@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from datetime import datetime  # <-- FIXED: Missing datetime import module added here!
 import json
 import html
 import hashlib
@@ -28,7 +29,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Quant War Room Hybrid V20 Engine is Active.", 200
+    return "Quant War Room Hybrid V21 Engine is Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -61,7 +62,6 @@ LATEST_METRICS_CACHE = {}
 
 # --- TELEGRAM SENDER ENGINE ---
 def send_telegram_message(text):
-    # Dynamic cleanup extraction to guarantee transport connection compatibility
     clean_token = TOKEN.replace('https://api.telegram.org/bot', '').replace('bot', '').strip()
     url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
     payload = {"chat_id": str(USER_CHAT_ID), "text": text, "parse_mode": "HTML"}
@@ -73,7 +73,7 @@ def send_telegram_message(text):
         return None
 
 # --- HYBRID QUANT ENGINE ---
-class RefinedQuantEngineV20:
+class RefinedQuantEngineV21:
     def __init__(self):
         self.okx = ccxt.okx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
         self.gate = ccxt.gate({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
@@ -282,14 +282,14 @@ def build_premium_report_string():
             
         msg += f"🪙 <b>Asset:</b> <code>{coin}</code> | <b>Price:</b> <code>{data['price']}</code>\n"
         msg += f"🏢 <b>Market Route:</b> <code>{data['route']}</code>\n"
-        msg += f"🔥 <b>Exhaustion Score:</b> <code>{abs(int(data['score']))}/100</code> | Status: {status_banner}\n"
+        msg += f"🔥 <b>Exhaustion Score:</b> <code>{abs(int(data['score']))}/100 electro</code> | Status: {status_banner}\n"
         msg += "────────────────────\n"
     return msg
 
 # --- TELEGRAM DECK MANAGER ---
 def telegram_control_panel_listener():
     offset = 0
-    bot_instance = RefinedQuantEngineV20()
+    bot_instance = RefinedQuantEngineV21()
     
     while True:
         url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20"
@@ -361,7 +361,7 @@ def telegram_control_panel_listener():
         time.sleep(1)
 
 def run_bot_loop():
-    bot = RefinedQuantEngineV20()
+    bot = RefinedQuantEngineV21()
     last_report_time = time.time()
 
     while True:
@@ -387,15 +387,11 @@ def run_bot_loop():
         time.sleep(5)
 
 if __name__ == "__main__":
-    # 1. Start Web container binding loop
     Thread(target=run_web_server, daemon=True).start()
     
-    # 2. Fire immediate pre-flight Token Verified success message
-    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v20.0 STARTED SUCCESSFULLY</b>\nTokens parsed flawlessly. Blank matrix active. Awaiting /add commands in chat, Bhai!"
+    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v21.0 STARTED SUCCESSFULLY</b>\nTokens parsed flawlessly. Blank matrix active. Awaiting /add commands in chat, Bhai!"
     send_telegram_message(startup_msg)
     
-    # 3. Open Listener pipes
     Thread(target=telegram_control_panel_listener, daemon=True).start()
     
-    # 4. Enter Main execution scanner sequence
     run_bot_loop()
