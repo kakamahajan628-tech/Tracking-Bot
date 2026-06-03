@@ -9,20 +9,29 @@ import requests
 from threading import Thread
 from flask import Flask
 
+# --- GLOBAL LIVE WATCHLIST ---
+# Initial memory state. These can be fully modified live via Telegram /add and /remove commands!
+TRACKED_COINS = ['BTC/USDT:USDT', 'ETH/USDT:USDT']
+
+# Global persistence dictionary shared across threads
+PERSISTENCE_TRACKER = {symbol: 0 for symbol in TRACKED_COINS}
+
+# Global dictionary to cache the latest scanned metrics for instant reports
+LATEST_METRICS_CACHE = {}
+
 # --- RENDER PORT BINDING SYSTEM ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Institutional Scalper V7 Engine is Running Background.", 200
+    return "Institutional Scalper V10 Control Panel Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- TELEGRAM SENDER UTILITY ---
+# --- TELEGRAM API WRAPPERS ---
 def send_telegram_message(token, chat_id, text):
-    """Direct synchronous utility pushing notification alerts to Telegram."""
     if not token or not chat_id:
         return
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -32,20 +41,16 @@ def send_telegram_message(token, chat_id, text):
     except Exception as e:
         print(f"[TELEGRAM ERROR] Failed pushing alert: {e}")
 
-# --- CORE TRADING ENGINE ---
-class InstitutionalScalperV7:
-    def __init__(self, symbols, tg_token, tg_chat_id):
+# --- BOT ENGINE CLASS ---
+class InstitutionalScalperV10:
+    def __init__(self):
         self.exchange = ccxt.gate({
             'enableRateLimit': True,
             'options': {'defaultType': 'swap'},
             'timeout': 20000,
             'headers': {'User-Agent': 'Mozilla/5.0'}
         })
-        self.symbols = symbols
         self.timeframes = ['1m', '5m', '15m']
-        self.tg_token = tg_token
-        self.tg_chat_id = tg_chat_id
-        self.persistence_tracker = {symbol: 0 for symbol in symbols}
 
     def safe_api_call(self, func, *args, **kwargs):
         for attempt in range(3):
@@ -72,7 +77,6 @@ class InstitutionalScalperV7:
         lows = df['low'].values
         size = len(df)
         pivot_highs, pivot_lows = [], []
-        
         for i in range(left_bars, size - right_bars):
             if all(highs[i] > highs[i - l] for l in range(1, left_bars + 1)) and \
                all(highs[i] >= highs[i + r] for r in range(1, right_bars + 1)):
@@ -86,20 +90,17 @@ class InstitutionalScalperV7:
         p_highs, p_lows = self.get_confirmed_pivots(df)
         closes = df['close'].values
         rsi = df['rsi'].values
-        
         mss = False
         if p_lows:
             last_low = p_lows[-1][1]
             if closes[-1] < last_low and closes[-2] < last_low:
                 mss = True
-                
         bearish_div = False
         if len(p_highs) >= 2:
             idx1, peak1 = p_highs[-2]
             idx2, peak2 = p_highs[-1]
             if peak2 > peak1 and rsi[idx2] < rsi[idx1]:
                 bearish_div = True
-                
         return mss, bearish_div
 
     def run_quantitative_indicators(self, df):
@@ -115,10 +116,8 @@ class InstitutionalScalperV7:
         all_tickers = self.safe_api_call(self.exchange.fetch_tickers, [symbol])
         if not all_tickers or symbol not in all_tickers:
             return None
-            
         live_price = all_tickers[symbol]['last']
         tf_data = {}
-        
         for tf in self.timeframes:
             candles = self.safe_api_call(self.exchange.fetch_ohlcv, symbol, tf, limit=250)
             if not candles or len(candles) < 60:
@@ -153,83 +152,157 @@ class InstitutionalScalperV7:
         price_up_15m = m15_df.loc[i15, 'close'] > m15_df.loc[p_i15, 'close']
         oi_now = self.fetch_open_interest_safely(symbol)
         time.sleep(0.1)
-        
         if oi_now and price_up_15m:
             score += 15
 
         hyper_bullish_15m = m15_df.loc[i15, 'ema_20'] > m15_df.loc[i15, 'ema_50'] and m15_df.loc[i15, 'adx'] > 32 and m15_df.loc[i15, 'rsi'] > 65
-        
         if hyper_bullish_15m and not m5_mss:
-            self.persistence_tracker[symbol] = 0
-            return {"status": "BLOCKED", "score": score, "price": live_price, "rsi": m1_df.loc[i1, 'rsi']}
+            PERSISTENCE_TRACKER[symbol] = 0
+            return {"status": "BLOCKED", "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi']}
+
+        if symbol not in PERSISTENCE_TRACKER:
+            PERSISTENCE_TRACKER[symbol] = 0
 
         if score >= 75:
-            self.persistence_tracker[symbol] += 1
+            PERSISTENCE_TRACKER[symbol] += 1
         else:
-            self.persistence_tracker[symbol] = 0
+            PERSISTENCE_TRACKER[symbol] = 0
 
         report_status = "NORMAL"
-        if score >= 75 and self.persistence_tracker[symbol] >= 3:
+        if score >= 75 and PERSISTENCE_TRACKER[symbol] >= 3:
             report_status = "TRIGGER"
-            self.persistence_tracker[symbol] = 0
+            PERSISTENCE_TRACKER[symbol] = 0
         elif score >= 50:
             report_status = "WATCHING"
 
-        return {"status": report_status, "score": score, "price": live_price, "rsi": m1_df.loc[i1, 'rsi']}
+        return {"status": report_status, "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi']}
 
-def run_bot_loop():
-    GATE_V6_WATCHLIST = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'BNB/USDT:USDT', 'XRP/USDT:USDT', 'SUI/USDT:USDT']
+# --- GENERATE TABULAR STRING UTILITY ---
+def build_matrix_table_string():
+    if not LATEST_METRICS_CACHE:
+        return "Bhai, database khali hai. Ek scanning cycle complete hone ka wait karo."
+    timestamp_str = datetime.now().strftime('%H:%M:%S')
+    report_msg = f"📊 *[LIVE GRID REPORT - {timestamp_str}]*\n```text\n"
+    report_msg += "COIN   | PRICE    | SCORE | 15M  | 5M   | 1M   \n"
+    report_msg += "───────┼──────────┼───────┼──────┼──────┼──────\n"
+    for coin, data in list(LATEST_METRICS_CACHE.items()):
+        c_name = f"{coin:<6}"
+        c_price = f"{str(data['price']):<8}"[:8]
+        c_score = f"{int(data['score']):<5}"
+        r15 = f"{int(data['rsi_15m']):<4}"
+        r5 = f"{int(data['rsi_5m']):<4}"
+        r1 = f"{int(data['rsi_1m']):<4}"
+        flag = ""
+        if data['status'] == "BLOCKED": flag = " ❌"
+        elif data['status'] == "WATCHING": flag = " ⚠️"
+        report_msg += f"{c_name} | {c_price} | {c_score} | {r15} | {r5} | {r1}{flag}\n"
+    report_msg += "```"
+    return report_msg
+
+# --- TELEGRAM CONTROL PANEL ENGINE (INBOUND LISTENER) ---
+def telegram_control_panel_listener():
+    """Listens for inbound slash commands from the user to dynamically edit vectors."""
+    token = os.environ.get("TELEGRAM_TOKEN", None)
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", None)
+    if not token or not chat_id:
+        return
+
+    offset = 0
+    print("[CONTROL PANEL] Telegram Inbound Command Listener Active.")
     
+    while True:
+        url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=20"
+        try:
+            response = requests.get(url, timeout=25).json()
+            if "result" in response:
+                for update in response["result"]:
+                    offset = update["update_id"] + 1
+                    if "message" in update and "text" in update["message"]:
+                        msg_text = update["message"]["text"].strip()
+                        incoming_chat_id = str(update["message"]["chat"]["id"])
+                        
+                        # Security Check: Process commands ONLY if they come from your configured chat ID
+                        if incoming_chat_id != str(chat_id):
+                            continue
+
+                        # Command Processing Logic
+                        if msg_text.startswith('/add '):
+                            coin_to_add = msg_text.replace('/add ', '').strip().upper()
+                            full_symbol = f"{coin_to_add}/USDT:USDT"
+                            if full_symbol not in TRACKED_COINS:
+                                TRACKED_COINS.append(full_symbol)
+                                PERSISTENCE_TRACKER[full_symbol] = 0
+                                send_telegram_message(token, chat_id, f"✅ *{coin_to_add}* successfully added to live tracking matrix grid!")
+                            else:
+                                send_telegram_message(token, chat_id, f"⚠️ *{coin_to_add}* is already being scanned.")
+
+                        elif msg_text.startswith('/remove '):
+                            coin_to_rem = msg_text.replace('/remove ', '').strip().upper()
+                            full_symbol = f"{coin_to_rem}/USDT:USDT"
+                            if full_symbol in TRACKED_COINS:
+                                TRACKED_COINS.remove(full_symbol)
+                                if full_symbol in PERSISTENCE_TRACKER: del PERSISTENCE_TRACKER[full_symbol]
+                                if coin_to_rem in LATEST_METRICS_CACHE: del LATEST_METRICS_CACHE[coin_to_rem]
+                                send_telegram_message(token, chat_id, f"🗑️ *{coin_to_rem}* removed cleanly from core memory streams.")
+                            else:
+                                send_telegram_message(token, chat_id, f"❌ *{coin_to_rem}* not found in active tracking list.")
+
+                        elif msg_text == '/list':
+                            clean_list = [c.split('/')[0] for c in TRACKED_COINS]
+                            send_telegram_message(token, chat_id, f"📋 *Active Watchlist Engine Status:*\n`{', '.join(clean_list)}`")
+
+                        elif msg_text == '/report':
+                            # Instant report on demand bypasses 1 minute timer limits
+                            send_telegram_message(token, chat_id, build_matrix_table_string())
+        except Exception as e:
+            print(f"[CONTROL PANEL ERROR] Listener loop glitch: {e}")
+        time.sleep(1)
+
+# --- LIVE COMPUTATION PROCESS LOOP ---
+def run_bot_loop():
     TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", None)
     TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", None)
     
-    # 1. INSTANT STARTUP ALARM
-    startup_msg = "🚀 *Gate.io Institutional Scalper Bot V7 Engine Started Successfully!*\nLive Monitoring Grid Active."
-    print("[SYSTEM] Boot successful. Firing Telegram startup trigger.")
+    startup_msg = "🚀 *Gate.io Institutional Scalper Bot V10 Live!*\nControl Panel Connected. Use `/add`, `/remove`, `/list`, `/report` in chat."
     send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, startup_msg)
 
-    bot = InstitutionalScalperV7(symbols=GATE_V6_WATCHLIST, tg_token=TELEGRAM_TOKEN, tg_chat_id=TELEGRAM_CHAT_ID)
-    
-    # Track the exact minute window for periodic updates
+    bot = InstitutionalScalperV10()
     last_report_time = time.time()
 
     while True:
-        cycle_results = []
+        # Create a local copy of the list to prevent runtime multi-threading adjustment errors
+        active_loop_list = list(TRACKED_COINS)
         
-        for asset in GATE_V6_WATCHLIST:
+        for asset in active_loop_list:
             metrics = bot.evaluate_asset_metrics(asset)
             if metrics:
                 clean_name = asset.split('/')[0]
-                cycle_results.append((clean_name, metrics))
+                # Cache results for explicit on-demand tracking lookups
+                LATEST_METRICS_CACHE[clean_name] = metrics
                 
-                # Instant Alert execution if persistence matches
                 if metrics['status'] == "TRIGGER":
-                    alert_txt = f"🚨 *[EXECUTION TRIGGER]* 🚨\n\n*Coin:* {clean_name}\n*Price:* {metrics['price']}\n*Exhaustion Score:* {metrics['score']:.1f}/100\n\nStructure broken across micro grids. Check positions!"
+                    alert_txt = f"🚨 *[EXECUTION TRIGGER]* 🚨\n\n*Coin:* {clean_name}\n*Price:* {metrics['price']}\n*Exhaustion Score:* {metrics['score']:.1f}/100\n\nGrid execution metrics matched. Short position viable."
                     send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, alert_txt)
             time.sleep(0.5)
 
-        # 2. PERIODIC 1-MINUTE REPORT ENGINE
+        # Automatic 1-Minute routine push update loop
         current_time = time.time()
         if current_time - last_report_time >= 60:
-            timestamp_str = datetime.now().strftime('%H:%M:%S')
-            report_msg = f"📊 *[LIVE BOT STATUS REPORT - {timestamp_str}]*\n"
-            report_msg += "───────────────────\n"
-            
-            for coin, data in cycle_results:
-                status_icon = "🟢"
-                if data['status'] == "BLOCKED": status_icon = "❌"
-                elif data['status'] == "WATCHING": status_icon = "⚠️"
-                
-                report_msg += f"{status_icon} *{coin}* | P: `{data['price']}` | Score: `{data['score']:.1f}` | 1m-RSI: `{data['rsi']:.1f}`\n"
-            
-            send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, report_msg)
+            send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, build_matrix_table_string())
             last_report_time = current_time
 
-        time.sleep(10) # Base system sleep spacing loop cycles smoothly
+        time.sleep(5)
 
 if __name__ == "__main__":
+    # 1. Web Endpoint Binder thread for keeping Render host execution alive
     server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
+    # 2. Control Panel Listener thread managing instant incoming chat commands
+    control_thread = Thread(target=telegram_control_panel_listener)
+    control_thread.daemon = True
+    control_thread.start()
+
+    # 3. Main processing scanner thread running quantitative loops sequentially
     run_bot_loop()
