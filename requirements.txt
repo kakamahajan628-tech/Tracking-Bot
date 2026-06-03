@@ -3,5 +3,4 @@ pandas==2.2.1
 numpy==1.26.4
 ta==0.11.0
 flask==3.0.2
-colorama==0.4.6
-werkzeug==3.0.1
+scipy==1.12.0
