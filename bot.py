@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import ta
 import requests
+import ccxt
 from threading import Thread
 from flask import Flask
 from scipy.signal import find_peaks
@@ -27,55 +28,55 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Quant War Room Hybrid V19 Engine is Active.", 200
+    return "Quant War Room Hybrid V20 Engine is Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- SYSTEM ENVIRONMENT CONSTANTS ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-raw_chat_id = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("USER_CHAT_ID")
-USER_CHAT_ID = int(raw_chat_id) if (raw_chat_id and raw_chat_id.strip().isdigit()) else None
+# --- CLEAN ENGINE FOR ENVIRONMENT VARIABLES ---
+def get_clean_env_var(key):
+    """Strips away hidden markdown symbols, spaces, or brackets from Render config vars."""
+    val = os.environ.get(key, None)
+    if not val:
+        return None
+    clean_val = str(val).strip()
+    for char in ['[', ']', '(', ')', "'", '"']:
+        clean_val = clean_val.replace(char, '')
+    return clean_val
+
+# --- BOOTSTRAP TOKENS CLEANUP LOADING ---
+TOKEN = get_clean_env_var("TELEGRAM_TOKEN")
+raw_chat_id = get_clean_env_var("TELEGRAM_CHAT_ID") or get_clean_env_var("USER_CHAT_ID")
+USER_CHAT_ID = int(raw_chat_id) if (raw_chat_id and str(raw_chat_id).strip().isdigit()) else None
 
 if not TOKEN or not USER_CHAT_ID:
-    logging.critical("ENVIRONMENT CONFIGURATION ERROR: System tokens missing. Core execution aborted.")
+    logging.critical("ENVIRONMENT CONFIGURATION ERROR: Clean system tokens missing. Core execution aborted.")
     sys.exit(1)
 
-# --- MEMORY MATRIX REGISTRIES ---
-TRACKED_COINS_ROUTER = {}  # Format: {'BTC/USDT:USDT': {'exchange': 'OKX', 'type': 'FUTURES'}}
+# --- GLOBAL WATCHLIST CONFIG (BLANK STARTUP) ---
+TRACKED_COINS_ROUTER = {}
 PERSISTENCE_TRACKER = {}
 LATEST_METRICS_CACHE = {}
 
-# Rate-Limiting Hardware Isolation Pools
-OKX_SEMAPHORE = asyncio.Semaphore(5)
-GATEIO_SEMAPHORE = asyncio.Semaphore(5)
-GLOBAL_SCAN_SEMAPHORE = asyncio.Semaphore(10)
-
 # --- TELEGRAM SENDER ENGINE ---
 def send_telegram_message(text):
-    if not TOKEN or not USER_CHAT_ID:
-        return
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    # Dynamic cleanup extraction to guarantee transport connection compatibility
+    clean_token = TOKEN.replace('https://api.telegram.org/bot', '').replace('bot', '').strip()
+    url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
     payload = {"chat_id": str(USER_CHAT_ID), "text": text, "parse_mode": "HTML"}
     try:
-        requests.post(url, json=payload, timeout=10)
+        res = requests.post(url, json=payload, timeout=12)
+        return res.json()
     except Exception as e:
         logging.error(f"[TELEGRAM ERROR] Transport failed: {e}")
+        return None
 
-# --- REFINED HYBRID QUANT ENGINE ---
-class RefinedQuantEngineV19:
+# --- HYBRID QUANT ENGINE ---
+class RefinedQuantEngineV20:
     def __init__(self):
-        # Initializing clean public abstraction layer clients
-        self.okx = ccxt.okx({'enableRateLimit': True, 'timeout': 15000}) if 'ccxt' in sys.modules else None
-        self.gate = ccxt.gate({'enableRateLimit': True, 'timeout': 15000}) if 'ccxt' in sys.modules else None
-        
-        # Internal fallback if native async ccxt isn't loaded yet
-        if not self.okx:
-            import ccxt
-            self.okx = ccxt.okx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
-            self.gate = ccxt.gate({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
-            
+        self.okx = ccxt.okx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
+        self.gate = ccxt.gate({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
         self.timeframes = ['1m', '5m', '15m']
 
     def safe_api_call(self, exchange_instance, func, *args, **kwargs):
@@ -84,12 +85,11 @@ class RefinedQuantEngineV19:
                 return func(*args, **kwargs)
             except Exception as e:
                 if attempt == 2:
-                    logging.debug(f"[EXCHANGE TIMEOUT] Safely bypassed network block: {e}")
+                    logging.debug(f"[EXCHANGE TIMEOUT] Bypassed network block: {e}")
                 time.sleep(1)
         return None
 
     def analyze_orderbook_pressure(self, exchange_instance, symbol):
-        """Fetches dynamic order depth walls utilizing precision weighting."""
         try:
             orderbook = self.safe_api_call(exchange_instance, exchange_instance.fetch_order_book, symbol, limit=20)
             if not orderbook or not orderbook.get('bids') or not orderbook.get('asks'):
@@ -105,7 +105,7 @@ class RefinedQuantEngineV19:
             
             order_flow_status = "BALANCED"
             if top_bid_val > (top_ask_val * 1.8): order_flow_status = "BUY WALL"
-            elif top_ask_val > (top_bid_val * 1.8): order_flow_status = "SELL WALL"
+            elif top_ask_val > (top_ask_val * 1.8): order_flow_status = "SELL WALL"
             
             weighted_bids = sum(qty * np.exp(-abs(price - mid_price) / (spread * 5)) for price, qty in bids[:10])
             weighted_asks = sum(qty * np.exp(-abs(price - mid_price) / (spread * 5)) for price, qty in asks[:10])
@@ -183,53 +183,43 @@ class RefinedQuantEngineV19:
         i1, i5, i15 = m1_df.index[-1], m5_df.index[-1], m15_df.index[-1]
         p_i1 = m1_df.index[-2]
         
-        # Core Calculations
         m1_mss, m1_div = self.check_market_structure_shift(m1_df)
         m5_mss, _ = self.check_market_structure_shift(m5_df)
         m15_mss, _ = self.check_market_structure_shift(m15_df)
         
         bid_pct, orderbook_status = self.analyze_orderbook_pressure(ex, symbol)
         
-        # --- QUANT CORE MATRIX OVERHAUL (NO RSI ACCUMULATION) ---
         score = 0
-        if m1_mss: score -= 15           # 1m MSS breaks down structure
-        if m5_mss: score -= 25           # 5m core trend shifts bearish
-        if m15_mss: score -= 35          # 15m anchor breaking down
-        if m1_div: score -= 15           # Momentum Bearish Divergence
+        if m1_mss: score -= 15
+        if m5_mss: score -= 25
+        if m15_mss: score -= 35
+        if m1_div: score -= 15
         
         macd_weakening_1m = m1_df.loc[i1, 'macd_hist'] < m1_df.loc[p_i1, 'macd_hist']
         if macd_weakening_1m: score -= 10
         if orderbook_status == "SELL WALL": score -= 15
         if orderbook_status == "BUY WALL": score += 20
         
-        # Calculate dynamic momentum
         has_ema = len(m1_df['ema_50']) > 0 and pd.notna(m1_df.loc[i1, 'ema_50'])
         trend_regime = "BULLISH" if (has_ema and live_price > m1_df.loc[i1, 'ema_50']) else "BEARISH"
         momentum_strength = "STRONG" if m1_df.loc[i1, 'adx'] > 28 else "WEAK"
         
-        # Whale flow approximation based on real volume metrics
         recent_vol = m1_df['volume'].tail(3).mean()
         historical_vol = m1_df['volume'].tail(20).head(15).mean()
         whale_flow = "BUYING" if (trend_regime == "BULLISH" and recent_vol > historical_vol) else "SELLING"
 
-        # --- HARD LOCK REVERSE CRITICAL MATRIX ---
-        # If the structure is completely parabolic but starting structural shifts emerge
         hyper_bullish_15m = m15_df.loc[i15, 'ema_20'] > m15_df.loc[i15, 'ema_50'] and m15_df.loc[i15, 'adx'] > 35
         if hyper_bullish_15m and not m1_mss and score < -50:
-            score = -30 # Soft clamp raw signals to prevent pre-mature shorts on strong extensions
+            score = -30
 
-        if symbol not in PERSISTENCE_TRACKER:
-            PERSISTENCE_TRACKER[symbol] = 0
-
-        # Matrix Action Routing Assignments
         report_status = "SCAN"
         if score <= -65:
-            PERSISTENCE_TRACKER[symbol] -= 1
+            PERSISTENCE_TRACKER[symbol] = PERSISTENCE_TRACKER.get(symbol, 0) - 1
             if PERSISTENCE_TRACKER[symbol] <= -3:
                 report_status = "SHORT_THOKO"
                 PERSISTENCE_TRACKER[symbol] = 0
         elif score >= 65:
-            PERSISTENCE_TRACKER[symbol] += 1
+            PERSISTENCE_TRACKER[symbol] = PERSISTENCE_TRACKER.get(symbol, 0) + 1
             if PERSISTENCE_TRACKER[symbol] >= 3:
                 report_status = "LONG_THOKO"
                 PERSISTENCE_TRACKER[symbol] = 0
@@ -244,43 +234,65 @@ class RefinedQuantEngineV19:
 
 # --- PREMIUM VISUAL CARD FORMATTER ---
 def build_premium_war_room_card(coin, data):
-    """Outputs a mobile optimized visual telemetry card structure cleanly matching requested design constraints."""
     status_icon = "🟢" if "LONG" in data['status'] or data['score'] >= 0 else "🔴"
     execution_verdict = "WAIT & SCAN"
     
     if data['status'] == "LONG_THOKO": execution_verdict = "LONG THOKO 🟢"
     elif data['status'] == "SHORT_THOKO": execution_verdict = "SHORT THOKO 🔴"
     
-    # Mathematical score mapping format display bounds
     abs_score = abs(int(data['score']))
     
-    msg = "🛰️ *QUANT WAR ROOM*\n"
+    msg = "🛰️ <b>QUANT WAR ROOM</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
-    msg += f"{status_icon} *{coin}/USDT*\n\n"
-    msg += f"💰 *Price* ➜ ${data['price']}\n"
-    msg += f"🐋 *Whale Flow* ➜ {data['whale_flow']}\n"
-    msg += f"🏦 *Orderbook* ➜ {data['orderbook']}\n"
-    msg += f"📡 *Trend* ➜ {data['trend']}\n"
-    msg += f"⚡ *Momentum* ➜ {data['momentum']}\n\n"
-    msg += f"📊 *Engine Score Matrix:* `{abs_score}/100` via `{data['exchange']}`\n\n"
-    msg += "🤖 *AI Verdict:* \n"
-    msg += f"• Matrix Shift: `{'MATCHED' if abs_score > 60 else 'STABLE'}`\n"
-    msg += f"• Flows: `{'DOMINATING' if data['whale_flow'] != 'BALANCED' else 'CONSOLIDATING'}`\n\n"
-    msg += f"🎯 *EXECUTION: {execution_verdict}*\n"
+    msg += f"{status_icon} <b>{coin}/USDT</b>\n\n"
+    msg += f"💰 <b>Price</b> ➜ ${data['price']}\n"
+    msg += f"🐋 <b>Whale Flow</b> ➜ {data['whale_flow']}\n"
+    msg += f"🏦 <b>Orderbook</b> ➜ {data['orderbook']}\n"
+    msg += f"📡 <b>Trend</b> ➜ {data['trend']}\n"
+    msg += f"⚡ <b>Momentum</b> ➜ {data['momentum']}\n\n"
+    msg += f"📊 <b>Engine Score Matrix:</b> <code>{abs_score}/100</code> via <code>{data['exchange']}</code>\n\n"
+    msg += "🤖 <b>AI Verdict:</b> \n"
+    msg += f"• Matrix Shift: <code>{'MATCHED' if abs_score > 60 else 'STABLE'}</code>\n"
+    msg += f"• Flows: <code>{'DOMINATING' if data['whale_flow'] != 'BALANCED' else 'CONSOLIDATING'}</code>\n\n"
+    msg += f"🎯 <b>EXECUTION: {execution_verdict}</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━━━"
+    return msg
+
+def build_premium_report_string():
+    if not TRACKED_COINS_ROUTER:
+        return "📋 <b>Watchlist Khali Hai!</b> Chat me <code>/add [coin]</code> karke scanning shuru karein bhai."
+    if not LATEST_METRICS_CACHE:
+        return "⏳ <b>Bhai, data sync ho raha hai.</b> Please wait 1 cycle."
+    
+    timestamp = datetime.now().strftime('%H:%M:%S')
+    msg = f"📊 <b>[QUANT WATCHLIST SNAPSHOT — {timestamp}]</b>\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
+    for coin in list(LATEST_METRICS_CACHE.keys()):
+        swap_sym = f"{coin}/USDT:USDT"
+        spot_sym = f"{coin}/USDT"
+        if swap_sym not in TRACKED_COINS_ROUTER and spot_sym not in TRACKED_COINS_ROUTER:
+            continue
+            
+        data = LATEST_METRICS_CACHE[coin]
+        status_banner = "🟢 TREND INTACT"
+        if data['status'] == "BLOCKED":
+            status_banner = "❌ SHORT BLOCKED (Hyper-Bull)"
+        elif data['status'] == "WATCHING" or data['status'] == "SCAN":
+            if abs(data['score']) > 45: status_banner = "⚠️ EXHAUSTION DETECTED"
+            
+        msg += f"🪙 <b>Asset:</b> <code>{coin}</code> | <b>Price:</b> <code>{data['price']}</code>\n"
+        msg += f"🏢 <b>Market Route:</b> <code>{data['route']}</code>\n"
+        msg += f"🔥 <b>Exhaustion Score:</b> <code>{abs(int(data['score']))}/100</code> | Status: {status_banner}\n"
+        msg += "────────────────────\n"
     return msg
 
 # --- TELEGRAM DECK MANAGER ---
 def telegram_control_panel_listener():
-    token = get_clean_env_var("TELEGRAM_TOKEN")
-    chat_id = get_clean_env_var("TELEGRAM_CHAT_ID")
-    if not token or not chat_id: return
-
     offset = 0
-    bot_instance = RefinedQuantEngineV19()
+    bot_instance = RefinedQuantEngineV20()
     
     while True:
-        url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=20"
+        url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20"
         try:
             response = requests.get(url, timeout=25).json()
             if "result" in response:
@@ -289,7 +301,7 @@ def telegram_control_panel_listener():
                     if "message" in update and "text" in update["message"]:
                         msg_text = update["message"]["text"].strip()
                         incoming_chat_id = str(update["message"]["chat"]["id"])
-                        if incoming_chat_id != str(chat_id).strip(): continue
+                        if incoming_chat_id != str(USER_CHAT_ID).strip(): continue
 
                         if msg_text.startswith('/add '):
                             raw_coin = msg_text.replace('/add ', '').strip().upper()
@@ -307,21 +319,21 @@ def telegram_control_panel_listener():
                             elif spot_symbol in bot_instance.gate.markets: determined_ex, market_type, final_symbol = 'GATE', 'SPOT', spot_symbol
 
                             if not determined_ex:
-                                send_telegram_message(f"❌ *{raw_coin}* Spot/Futures me OKX ya Gate.io par nahi mila!")
+                                send_telegram_message(f"❌ <b>{raw_coin}</b> Spot ya Futures me OKX ya Gate.io par nahi mila!")
                                 continue
 
                             if final_symbol not in TRACKED_COINS_ROUTER:
                                 TRACKED_COINS_ROUTER[final_symbol] = {'exchange': determined_ex, 'type': market_type}
                                 PERSISTENCE_TRACKER[final_symbol] = 0
-                                send_telegram_message(f"⏳ Syncing *{raw_coin}* metrics via {determined_ex}...")
+                                send_telegram_message(f"⏳ Syncing <b>{raw_coin}</b> metrics via {determined_ex} ({market_type} Route)...")
                                 instant_m = bot_instance.evaluate_hybrid_asset(final_symbol, TRACKED_COINS_ROUTER[final_symbol])
                                 if instant_m:
                                     LATEST_METRICS_CACHE[raw_coin] = instant_m
                                     send_telegram_message(build_premium_war_room_card(raw_coin, instant_m))
                                 else:
-                                    send_telegram_message(f"✅ *{raw_coin}* watchlist me add ho gaya hai pipeline pass queue me.")
+                                    send_telegram_message(f"✅ <b>{raw_coin}</b> added to tracking loop passes.")
                             else:
-                                send_telegram_message(f"⚠️ *{raw_coin}* already active.")
+                                send_telegram_message(f"⚠️ <b>{raw_coin}</b> is already active.")
 
                         elif msg_text.startswith('/remove '):
                             raw_coin = msg_text.replace('/remove ', '').strip().upper()
@@ -331,29 +343,25 @@ def telegram_control_panel_listener():
                                 del TRACKED_COINS_ROUTER[target_symbol]
                                 if target_symbol in PERSISTENCE_TRACKER: del PERSISTENCE_TRACKER[target_symbol]
                                 if raw_coin in LATEST_METRICS_CACHE: del LATEST_METRICS_CACHE[raw_coin]
-                                send_telegram_message(f"🗑️ *{raw_coin}* cleanly removed from war room tracking matrices.")
+                                send_telegram_message(f"🗑️ <b>{raw_coin}</b> removed from war room memory caches.")
                             else:
-                                send_telegram_message(f"❌ *{raw_coin}* active list me nahi mila.")
+                                send_telegram_message(f"❌ <b>{raw_coin}</b> active list me nahi mila.")
 
                         elif msg_text == '/list':
                             if not TRACKED_COINS_ROUTER:
-                                send_telegram_message("📋 *Watchlist Engine:* `Khali Hai` (Use `/add [coin]`) ")
+                                send_telegram_message("📋 <b>Active Watchlist:</b> <code>Khali Hai</code> (Use <code>/add [coin]</code>)")
                                 continue
                             lines = [f"{k.split('/')[0]} ({v['exchange']}-{v['type']})" for k, v in TRACKED_COINS_ROUTER.items()]
-                            send_telegram_message(f"📋 *Active Watchlist Tracker Elements:*\n`{', '.join(lines)}`")
+                            send_telegram_message(f"📋 <b>Active Watchlist Tracker Elements:</b>\n<code>{', '.join(lines)}</code>")
 
                         elif msg_text == '/report':
-                            if not LATEST_METRICS_CACHE:
-                                send_telegram_message("⏳ Data synchronize ho raha hai.")
-                                continue
-                            for coin, data in list(LATEST_METRICS_CACHE.items()):
-                                send_telegram_message(build_premium_war_room_card(coin, data))
+                            send_telegram_message(build_premium_report_string())
         except Exception as e:
-            print(f"[CONTROL PANEL MAIN LOG ERROR] {e}")
+            print(f"[CONTROL PANEL ERROR] {e}")
         time.sleep(1)
 
 def run_bot_loop():
-    bot = RefinedQuantEngineV19()
+    bot = RefinedQuantEngineV20()
     last_report_time = time.time()
 
     while True:
@@ -368,19 +376,26 @@ def run_bot_loop():
                 clean_name = asset.split('/')[0]
                 LATEST_METRICS_CACHE[clean_name] = metrics
                 
-                # Dynamic Alert Push on Persistent Structural Shift Signals
                 if metrics['status'] in ["LONG_THOKO", "SHORT_THOKO"]:
                     send_telegram_message(build_premium_war_room_card(clean_name, metrics))
             time.sleep(0.5)
 
         current_time = time.time()
         if current_time - last_report_time >= 60:
-            for coin, data in list(LATEST_METRICS_CACHE.items()):
-                send_telegram_message(build_premium_war_room_card(coin, data))
+            send_telegram_message(build_premium_report_string())
             last_report_time = current_time
         time.sleep(5)
 
 if __name__ == "__main__":
+    # 1. Start Web container binding loop
     Thread(target=run_web_server, daemon=True).start()
+    
+    # 2. Fire immediate pre-flight Token Verified success message
+    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v20.0 STARTED SUCCESSFULLY</b>\nTokens parsed flawlessly. Blank matrix active. Awaiting /add commands in chat, Bhai!"
+    send_telegram_message(startup_msg)
+    
+    # 3. Open Listener pipes
     Thread(target=telegram_control_panel_listener, daemon=True).start()
+    
+    # 4. Enter Main execution scanner sequence
     run_bot_loop()
