@@ -5,28 +5,36 @@ import pandas as pd
 import numpy as np
 import ta
 import os
+import requests
 from threading import Thread
 from flask import Flask
-from colorama import Fore, Style, init
-
-init(autoreset=True)
 
 # --- RENDER PORT BINDING SYSTEM ---
-# Flask app handles dummy web traffic so Render keeps the background bot alive 24/7
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Institutional Scalper V6 Engine is Running Seamlessly Background.", 200
+    return "Institutional Scalper V7 Engine is Running Background.", 200
 
 def run_web_server():
-    # Render automatically assigns a PORT environment variable
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
+# --- TELEGRAM SENDER UTILITY ---
+def send_telegram_message(token, chat_id, text):
+    """Direct synchronous utility pushing notification alerts to Telegram."""
+    if not token or not chat_id:
+        return
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[TELEGRAM ERROR] Failed pushing alert: {e}")
+
 # --- CORE TRADING ENGINE ---
-class InstitutionalScalperV6:
-    def __init__(self, symbols):
+class InstitutionalScalperV7:
+    def __init__(self, symbols, tg_token, tg_chat_id):
         self.exchange = ccxt.gate({
             'enableRateLimit': True,
             'options': {'defaultType': 'swap'},
@@ -35,6 +43,8 @@ class InstitutionalScalperV6:
         })
         self.symbols = symbols
         self.timeframes = ['1m', '5m', '15m']
+        self.tg_token = tg_token
+        self.tg_chat_id = tg_chat_id
         self.persistence_tracker = {symbol: 0 for symbol in symbols}
 
     def safe_api_call(self, func, *args, **kwargs):
@@ -104,7 +114,7 @@ class InstitutionalScalperV6:
     def evaluate_asset_metrics(self, symbol):
         all_tickers = self.safe_api_call(self.exchange.fetch_tickers, [symbol])
         if not all_tickers or symbol not in all_tickers:
-            return
+            return None
             
         live_price = all_tickers[symbol]['last']
         tf_data = {}
@@ -112,7 +122,7 @@ class InstitutionalScalperV6:
         for tf in self.timeframes:
             candles = self.safe_api_call(self.exchange.fetch_ohlcv, symbol, tf, limit=250)
             if not candles or len(candles) < 60:
-                return
+                return None
             df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df = self.run_quantitative_indicators(df)
             tf_data[tf] = df
@@ -148,37 +158,78 @@ class InstitutionalScalperV6:
             score += 15
 
         hyper_bullish_15m = m15_df.loc[i15, 'ema_20'] > m15_df.loc[i15, 'ema_50'] and m15_df.loc[i15, 'adx'] > 32 and m15_df.loc[i15, 'rsi'] > 65
+        
         if hyper_bullish_15m and not m5_mss:
-            print(f"❌ {symbol} | Price: {live_price} | SHORT BLOCKED - Parabolic Trend (15m-ADX: {m15_df.loc[i15, 'adx']:.1f})")
             self.persistence_tracker[symbol] = 0
-            return
+            return {"status": "BLOCKED", "score": score, "price": live_price, "rsi": m1_df.loc[i1, 'rsi']}
 
         if score >= 75:
             self.persistence_tracker[symbol] += 1
         else:
             self.persistence_tracker[symbol] = 0
 
-        print(f"📊 {symbol} | Price: {live_price} | Score: {score:.1f}/100 | Loops: {self.persistence_tracker[symbol]}")
-        
-        if self.persistence_tracker[symbol] >= 3:
-            print(f"🚨 [🚨 ENTRY TRIGGER] {symbol} Confirmed Exhaustion State Across Matrix Grid Layers!")
+        report_status = "NORMAL"
+        if score >= 75 and self.persistence_tracker[symbol] >= 3:
+            report_status = "TRIGGER"
             self.persistence_tracker[symbol] = 0
+        elif score >= 50:
+            report_status = "WATCHING"
+
+        return {"status": report_status, "score": score, "price": live_price, "rsi": m1_df.loc[i1, 'rsi']}
 
 def run_bot_loop():
     GATE_V6_WATCHLIST = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'BNB/USDT:USDT', 'XRP/USDT:USDT', 'SUI/USDT:USDT']
-    bot = InstitutionalScalperV6(symbols=GATE_V6_WATCHLIST)
-    print("[BOT ENGINE] High Frequency Production Pass Loop Engaged.")
+    
+    TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", None)
+    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", None)
+    
+    # 1. INSTANT STARTUP ALARM
+    startup_msg = "🚀 *Gate.io Institutional Scalper Bot V7 Engine Started Successfully!*\nLive Monitoring Grid Active."
+    print("[SYSTEM] Boot successful. Firing Telegram startup trigger.")
+    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, startup_msg)
+
+    bot = InstitutionalScalperV7(symbols=GATE_V6_WATCHLIST, tg_token=TELEGRAM_TOKEN, tg_chat_id=TELEGRAM_CHAT_ID)
+    
+    # Track the exact minute window for periodic updates
+    last_report_time = time.time()
+
     while True:
+        cycle_results = []
+        
         for asset in GATE_V6_WATCHLIST:
-            bot.evaluate_asset_metrics(asset)
+            metrics = bot.evaluate_asset_metrics(asset)
+            if metrics:
+                clean_name = asset.split('/')[0]
+                cycle_results.append((clean_name, metrics))
+                
+                # Instant Alert execution if persistence matches
+                if metrics['status'] == "TRIGGER":
+                    alert_txt = f"🚨 *[EXECUTION TRIGGER]* 🚨\n\n*Coin:* {clean_name}\n*Price:* {metrics['price']}\n*Exhaustion Score:* {metrics['score']:.1f}/100\n\nStructure broken across micro grids. Check positions!"
+                    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, alert_txt)
             time.sleep(0.5)
-        time.sleep(15)
+
+        # 2. PERIODIC 1-MINUTE REPORT ENGINE
+        current_time = time.time()
+        if current_time - last_report_time >= 60:
+            timestamp_str = datetime.now().strftime('%H:%M:%S')
+            report_msg = f"📊 *[LIVE BOT STATUS REPORT - {timestamp_str}]*\n"
+            report_msg += "───────────────────\n"
+            
+            for coin, data in cycle_results:
+                status_icon = "🟢"
+                if data['status'] == "BLOCKED": status_icon = "❌"
+                elif data['status'] == "WATCHING": status_icon = "⚠️"
+                
+                report_msg += f"{status_icon} *{coin}* | P: `{data['price']}` | Score: `{data['score']:.1f}` | 1m-RSI: `{data['rsi']:.1f}`\n"
+            
+            send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, report_msg)
+            last_report_time = current_time
+
+        time.sleep(10) # Base system sleep spacing loop cycles smoothly
 
 if __name__ == "__main__":
-    # Step 1: Start the web port binding server inside a parallel daemon background thread
     server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
-    # Step 2: Start the sequential technical scanning engine loop
     run_bot_loop()
