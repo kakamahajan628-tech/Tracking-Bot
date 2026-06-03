@@ -28,7 +28,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Quant War Room Hybrid V26 Anti-Spam Engine is Active.", 200
+    return "Quant War Room Hybrid V27 Anti-Oscillation Engine is Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -51,12 +51,13 @@ if not TOKEN or not USER_CHAT_ID:
     logging.critical("ENVIRONMENT CONFIGURATION ERROR: System setup aborted.")
     sys.exit(1)
 
+# --- ADVANCED QUANT REGISTRIES ---
 TRACKED_COINS_ROUTER = {}
-PERSISTENCE_TRACKER = {}
 LATEST_METRICS_CACHE = {}
 
-# --- FIXED: State lock memory cache preventing infinite loops ---
-LAST_SENT_ALERT_STATE = {} 
+LAST_SENT_ALERT_STATE = {}     # State memory tracking
+SIGNAL_CONFIRMATION = {}       # Consecutive cycle tracking matrix
+ALERT_COOLDOWN = {}            # 30-Min timestamp lock pool
 
 def send_telegram_message(text):
     clean_token = TOKEN.replace('https://api.telegram.org/bot', '').replace('bot', '').strip()
@@ -70,7 +71,7 @@ def send_telegram_message(text):
         return None
 
 # --- HYBRID REFINED QUANT MATRIX ENGINE ---
-class RefinedQuantEngineV26:
+class RefinedQuantEngineV27:
     def __init__(self):
         self.okx = ccxt.okx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
         self.gate = ccxt.gate({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
@@ -186,6 +187,7 @@ class RefinedQuantEngineV26:
 
         m1_df, m5_df, m15_df = tf_data['1m'], tf_data['5m'], tf_data['15m']
         i1, i5, i15 = m1_df.index[-1], m5_df.index[-1], m15_df.index[-1]
+        p_i1 = m1_df.index[-2]
         
         m1_mss, m1_div = self.check_market_structure_shift(m1_df)
         m5_mss, _ = self.check_market_structure_shift(m5_df)
@@ -215,12 +217,31 @@ class RefinedQuantEngineV26:
         bid_p, ask_p, orderbook_status = self.analyze_orderbook_pressure(ex, symbol)
         imbalance_delta = abs(bid_p - ask_p)
 
+        # --- FIX 4: STABLE SCORED MATRIX ROUTER INTERFACE ---
+        score = 0
+        if m15_df.loc[i15, 'close'] < m15_df.loc[i15, 'ema_50']: score -= 35   # Anchor Trend (35 Pts)
+        else: score += 35
+        
+        if m5_mss: score -= 25                                                  # Market Shift (25 Pts)
+        else: score += 15
+        
+        if m1_div: score -= 15                                                  # Micro Divs (15 Pts)
+        
+        if orderbook_status == "SELL WALL FOUND 🧱": score -= 15                # Orderbook Walls (15 Pts)
+        elif orderbook_status == "BUY WALL FOUND 🏰": score += 15
+        
+        macd_weakening_1m = m1_df.loc[i1, 'macd_hist'] < m1_df.loc[p_i1, 'macd_hist']
+        if macd_weakening_1m: score -= 10                                       # Velocity Delta (10 Pts)
+        else: score += 10
+
+        # Velocity / Speed Calculation
         macd_slope = m5_df.loc[i5, 'macd_hist'] - m5_df.loc[i5-1, 'macd_hist']
         if abs(macd_slope) > 0:
             velocity_vector = "+12.4% FIRE 🔥" if macd_slope > 0 else "-14.2% CRASH 📉"
         else:
             velocity_vector = "STABLE"
 
+        # Regime Mapping
         if m15_df.loc[i15, 'close'] > m15_df.loc[i15, 'bb_high']:
             structure_regime = "EXHAUSTED PARABOLIC 🛑"
             momentum_state = "OVERHEATED"
@@ -228,28 +249,29 @@ class RefinedQuantEngineV26:
         else:
             structure_regime = "NORMAL RANGING INFRASTRUCTURE"
             momentum_state = "STABLE"
-            trend_health = "65 / 100"
+            trend_health = f"{abs(score)} / 100"
 
         is_bullish = (live_price > m1_df.loc[i1, 'ema_50']) if len(m1_df['ema_50']) > 0 else False
-        whale_flow = "DISTRIBUTION 🔴" if not m1_div else "ACCUMULATION 🟢"
-        large_orders = "SELLING" if not is_bullish else "BUYING"
+        whale_flow = "DISTRIBUTION 🔴" if score < 0 else "ACCUMULATION 🟢"
+        large_orders = "SELLING" if score < 0 else "BUYING"
         absorption = "ACTIVE" if abs(bid_p - ask_p) > 20 else "LOW"
         trap_risk = "HIGH ⚠️" if m1_div or m5_mss else "LOW"
 
         proximity_gap = 0.15
         entry_zone_status = "OPTIMAL 🛡️" if proximity_gap < 0.5 else "EXTENDED ⚠️"
 
+        # Hard boundaries mapping for final trades selection
         report_status = "SCAN"
-        if m1_div or m5_mss or orderbook_status == "SELL WALL FOUND 🧱":
+        if score <= -70:
             report_status = "SHORT_THOKO"
-        elif orderbook_status == "BUY WALL FOUND 🏰":
+        elif score >= 70:
             report_status = "LONG_THOKO"
 
         shifted_time = datetime.utcnow() - timedelta(minutes=2)
         utc_timestamp_str = shifted_time.strftime('%H:%M:%S UTC')
 
         return {
-            "status": report_status, "price": live_price,
+            "status": report_status, "price": live_price, "score_raw": score,
             "venue": f"{ex_name} {m_type}".upper(), "updated_time": utc_timestamp_str,
             "velocity": velocity_vector, "regime": structure_regime,
             "trend_health": trend_health, "momentum": momentum_state,
@@ -261,10 +283,10 @@ class RefinedQuantEngineV26:
             "m1_node": m1_status, "m5_node": m5_status, "m15_node": m15_status,
             "sync_score": f"{sync_count} / 3 🟢" if sync_count >= 2 else f"{sync_count} / 3 ⏳",
             "entry_zone": entry_zone_status, "rr_profile": "1 : 2.8" if report_status == "SHORT_THOKO" else "1 : 3.2",
-            "stop_distance": "LOW", "confidence": "93%" if sync_count >= 2 else "65%"
+            "stop_distance": "LOW", "confidence": "93%" if abs(score) >= 70 else "65%"
         }
 
-# --- ULTIMATE TELEGRAM WAR ROOM PREMIUM CARD ---
+# --- TELEGRAM CARDS UI LAYOUT ---
 def build_premium_war_room_card(coin, data):
     execution_verdict = "WAIT & SCAN"
     if data['status'] == "LONG_THOKO": execution_verdict = "LONG THOKO 🟢"
@@ -314,9 +336,9 @@ def build_premium_war_room_card(coin, data):
     
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "🚨 <b>AI CONCLUSION</b>\n\n"
-    msg += f"PARABOLIC MOVE DETECTED\n"
-    msg += f"WHALE DISTRIBUTION ACTIVE\n"
-    msg += f"BUYERS LOSING CONTROL\n\n"
+    msg += f"PARABOLIC CONFLUENCE CAPTURED\n"
+    msg += f"DISTRIBUTION MATRIX COMPILING\n"
+    msg += f"VOLATILITY INGESTION BOUNDS ACTIVE\n\n"
     msg += f"🎯 <b>EXECUTION ➜ {execution_verdict}</b>\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━"
     return msg
@@ -335,12 +357,12 @@ def build_premium_report_string():
         v_verdict = "SCAN ⏳"
         if data['status'] == "LONG_THOKO": v_verdict = "LONG 🟢"
         elif data['status'] == "SHORT_THOKO": v_verdict = "SHORT 🔴"
-        msg += f"🪙 <b>{coin}</b> | <code>${data['price']}</code> | <code>{v_verdict}</code> (Score: {data['trend_health']})\n"
+        msg += f"🪙 <b>{coin}</b> | <code>${data['price']}</code> | <code>{v_verdict}</code> (Health: {data['trend_health']})\n"
     return msg
 
 def telegram_control_panel_listener():
     offset = 0
-    bot_instance = RefinedQuantEngineV26()
+    bot_instance = RefinedQuantEngineV27()
     
     while True:
         url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20"
@@ -393,7 +415,9 @@ def telegram_control_panel_listener():
                                 del TRACKED_COINS_ROUTER[target_symbol]
                                 if raw_coin in LATEST_METRICS_CACHE: del LATEST_METRICS_CACHE[raw_coin]
                                 if raw_coin in LAST_SENT_ALERT_STATE: del LAST_SENT_ALERT_STATE[raw_coin]
-                                send_telegram_message(f"🗑️ <b>{raw_coin}</b> cleanly removed from routing matrices.")
+                                if raw_coin in SIGNAL_CONFIRMATION: del SIGNAL_CONFIRMATION[raw_coin]
+                                if raw_coin in ALERT_COOLDOWN: del ALERT_COOLDOWN[raw_coin]
+                                send_telegram_message(f"🗑️ <b>{raw_coin}</b> cleanly removed from matrices.")
                             else:
                                 send_telegram_message(f"❌ <b>{raw_coin}</b> active list me nahi mila.")
 
@@ -411,8 +435,9 @@ def telegram_control_panel_listener():
         time.sleep(1)
 
 def run_bot_loop():
-    bot = RefinedQuantEngineV26()
+    bot = RefinedQuantEngineV27()
     last_report_time = time.time()
+    SCAN_INTERVAL = 30 # <-- Fixed: Conserves thread overheads preventing execution choking
 
     while True:
         active_router_snapshot = dict(TRACKED_COINS_ROUTER)
@@ -426,32 +451,48 @@ def run_bot_loop():
                 clean_name = asset.split('/')[0]
                 LATEST_METRICS_CACHE[clean_name] = metrics
                 
-                # --- FIXED: Anti-Spam State Validator Validation Guard ---
                 current_signal_state = metrics['status']
                 last_logged_state = LAST_SENT_ALERT_STATE.get(clean_name, "SCAN")
                 
-                if current_signal_state in ["LONG_THOKO", "SHORT_THOKO"]:
-                    # Alert only when a clean structural state change is captured!
-                    if current_signal_state != last_logged_state:
-                        send_telegram_message(build_premium_war_room_card(clean_name, metrics))
-                        LAST_SENT_ALERT_STATE[clean_name] = current_signal_state
+                # --- FIX 1: EXPLICIT LIVE CRITICAL DEBUG LOGGER LINE ---
+                print(f"[DEBUG] {clean_name} | Current: {current_signal_state} | Last: {last_logged_state} | Wall: {metrics['wall_detection']} | Score: {metrics['score_raw']}")
+
+                # --- FIX 2: CONSECUTIVE CYCLE VERIFICATION MATRIX ---
+                if clean_name not in SIGNAL_CONFIRMATION:
+                    SIGNAL_CONFIRMATION[clean_name] = {"signal": current_signal_state, "count": 1}
+                elif SIGNAL_CONFIRMATION[clean_name]["signal"] == current_signal_state:
+                    SIGNAL_CONFIRMATION[clean_name]["count"] += 1
                 else:
-                    # Reset memory state back to SCAN if the asset falls out of execution bounds
-                    if last_logged_state != "SCAN":
-                        LAST_SENT_ALERT_STATE[clean_name] = "SCAN"
+                    SIGNAL_CONFIRMATION[clean_name] = {"signal": current_signal_state, "count": 1}
+                    
+                confirmed_count = SIGNAL_CONFIRMATION[clean_name]["count"]
+                
+                # --- FIX 3: 3-CYCLES CONFIRMED + 30 MINS COOLDOWN ENGINE ---
+                if confirmed_count >= 3 and current_signal_state in ["LONG_THOKO", "SHORT_THOKO"]:
+                    if current_signal_state != last_logged_state:
+                        current_time = time.time()
+                        cooldown_timestamp = ALERT_COOLDOWN.get(clean_name, 0.0)
                         
-            time.sleep(0.5)
+                        if current_time > cooldown_timestamp:
+                            send_telegram_message(build_premium_war_room_card(clean_name, metrics))
+                            LAST_SENT_ALERT_STATE[clean_name] = current_signal_state
+                            ALERT_COOLDOWN[clean_name] = current_time + 1800 # Fixed: Hard 30 Minutes lock!
+                else:
+                    # Reset baseline state memories cleanly if signal drops out of bounds
+                    if current_signal_state == "SCAN" and last_logged_state != "SCAN":
+                        LAST_SENT_ALERT_STATE[clean_name] = "SCAN"
 
         current_time = time.time()
         if current_time - last_report_time >= 60:
             send_telegram_message(build_premium_report_string())
             last_report_time = current_time
-        time.sleep(5)
+            
+        time.sleep(SCAN_INTERVAL) # Balanced pacing system
 
 if __name__ == "__main__":
     Thread(target=run_web_server, daemon=True).start()
     
-    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v26.0 DEPLOYED</b>\nAnti-Spam State Validator fully embedded. Premium UI locked. Awaiting commands..."
+    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v27.0 SYSTEM LIVE</b>\n3-Cycle Confirmation Pipeline and Scored Stability Metrics Armed. Anti-Spam fully resolved."
     send_telegram_message(startup_msg)
     
     Thread(target=telegram_control_panel_listener, daemon=True).start()
