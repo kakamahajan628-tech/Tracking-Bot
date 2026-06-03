@@ -10,18 +10,16 @@ from threading import Thread
 from flask import Flask
 
 # --- GLOBAL TRACKING REGISTRY ---
-TRACKED_COINS_ROUTER = {
-    'BTC/USDT:USDT': 'OKX',
-    'ETH/USDT:USDT': 'OKX'
-}
-PERSISTENCE_TRACKER = {symbol: 0 for symbol in TRACKED_COINS_ROUTER}
+# Stores the combination of exchange and specific market type (SWAP or SPOT)
+TRACKED_COINS_ROUTER = {}
+PERSISTENCE_TRACKER = {}
 LATEST_METRICS_CACHE = {}
 
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Institutional Scalper V16 Refined Hybrid Active.", 200
+    return "Institutional Scalper V18 Smart Routing Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -34,10 +32,6 @@ def get_clean_env_var(key):
     clean_val = str(val).strip()
     for char in ['[', ']', '(', ')', "'", '"']:
         clean_val = clean_val.replace(char, '')
-    if "api.telegram.org" in clean_val and "http" in clean_val:
-        if "http" in clean_val:
-            clean_val = clean_val.split("http")[-1]
-            clean_val = "http" + clean_val
     return clean_val
 
 def send_telegram_message(token, chat_id, text):
@@ -51,28 +45,17 @@ def send_telegram_message(token, chat_id, text):
     except Exception as e:
         print(f"[TELEGRAM ERROR] Transport failed: {e}")
 
-def clean_and_format_symbol(user_input):
-    raw = user_input.strip().upper()
-    if not raw:
-        return None
-    raw = raw.split(':')[0]
-    if raw.endswith('/USDT'):
-        raw = raw.replace('/USDT', '')
-    return f"{raw}/USDT:USDT"
-
-# --- REFINED HYBRID ENGINE CORE ---
-class HybridExhaustionEngineV16:
+# --- HYBRID ROUTER ENGINE CORE ---
+class HybridExhaustionEngineV18:
     def __init__(self):
-        # Optimized connection parameters to reduce thread overheads
+        # We handle multi-market parameters dynamically inside the endpoints calls now
         self.okx = ccxt.okx({
             'enableRateLimit': True,
-            'options': {'defaultType': 'swap'},
             'timeout': 15000,
             'headers': {'User-Agent': 'Mozilla/5.0'}
         })
         self.gate = ccxt.gate({
             'enableRateLimit': True,
-            'options': {'defaultType': 'swap'},
             'timeout': 15000,
             'headers': {'User-Agent': 'Mozilla/5.0'}
         })
@@ -118,22 +101,18 @@ class HybridExhaustionEngineV16:
         p_highs, p_lows = self.get_confirmed_pivots(df)
         closes = df['close'].values
         rsi = df['rsi'].values
-        
         mss = False
         if p_lows:
             last_low = p_lows[-1][1]
             if closes[-1] < last_low and closes[-2] < last_low:
                 mss = True
-                
         bearish_div = False
         if len(p_highs) >= 2:
             idx1, peak1 = p_highs[-2]
             idx2, peak2 = p_highs[-1]
-            # Safety length checks added to avoid indexing data drift bugs
             if idx2 < len(rsi) and idx1 < len(rsi):
                 if peak2 > peak1 and rsi[idx2] < rsi[idx1]:
                     bearish_div = True
-                    
         return mss, bearish_div
 
     def run_quantitative_indicators(self, df):
@@ -145,17 +124,12 @@ class HybridExhaustionEngineV16:
         df['atr'] = ta.volatility.average_true_range(df['high'], df['low'], df['close'], window=14)
         return df
 
-    def evaluate_hybrid_asset(self, symbol, exchange_name):
-        ex = self.okx if exchange_name == 'OKX' else self.gate
+    def evaluate_hybrid_asset(self, symbol, route_info):
+        """Processes calculations dynamically across configured spot or swap parameters."""
+        ex_name = route_info['exchange']
+        m_type = route_info['type']
+        ex = self.okx if ex_name == 'OKX' else self.gate
         
-        try:
-            if ex.markets is None:
-                self.safe_api_call(ex, ex.load_markets)
-            if symbol not in ex.markets:
-                return None
-        except Exception:
-            pass
-
         all_tickers = self.safe_api_call(ex, ex.fetch_tickers, [symbol])
         if not all_tickers or symbol not in all_tickers:
             return None
@@ -178,7 +152,6 @@ class HybridExhaustionEngineV16:
         m5_mss, _ = self.analyze_divergence_and_mss(m5_df)
         m15_mss, _ = self.analyze_divergence_and_mss(m15_df)
 
-        # --- REFINED TRADING LOGIC OVERLAY (100 PT MATRIX) ---
         score = 0
         if m1_mss: score += 10
         if m5_mss: score += 25
@@ -199,11 +172,10 @@ class HybridExhaustionEngineV16:
         if base_volume and price_up_15m:
             score += 15
 
-        # --- REFINED HARD LOCK RISK ENGINE ---
         hyper_bullish_15m = m15_df.loc[i15, 'ema_20'] > m15_df.loc[i15, 'ema_50'] and m15_df.loc[i15, 'adx'] > 32 and m15_df.loc[i15, 'rsi'] > 65
         if hyper_bullish_15m and not m5_mss:
             if symbol in PERSISTENCE_TRACKER: PERSISTENCE_TRACKER[symbol] = 0
-            return {"status": "BLOCKED", "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi'], "route": exchange_name}
+            return {"status": "BLOCKED", "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi'], "route": f"{ex_name} ({m_type})"}
 
         if symbol not in PERSISTENCE_TRACKER:
             PERSISTENCE_TRACKER[symbol] = 0
@@ -220,17 +192,22 @@ class HybridExhaustionEngineV16:
         elif score >= 50:
             report_status = "WATCHING"
 
-        return {"status": report_status, "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi'], "route": exchange_name}
+        return {"status": report_status, "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi'], "route": f"{ex_name} ({m_type})"}
 
 def build_premium_report_string():
+    if not TRACKED_COINS_ROUTER:
+        return "📋 *Watchlist Khali Hai!* Chat me `/add [coin]` karke scanning shuru karein bhai."
     if not LATEST_METRICS_CACHE:
-        return "⏳ *Bhai, Hybrid matrix data sync in progress.* Please wait 1 cycle."
+        return "⏳ *Bhai, data sync ho raha hai.* Please wait 1 cycle."
+        
     timestamp = datetime.now().strftime('%H:%M:%S')
-    msg = f"📊 *[REFINE EXHAUSTION DASHBOARD — {timestamp}]*\n"
+    msg = f"📊 *[SMART ROUTING WATCHLIST — {timestamp}]*\n"
     msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
     for coin in list(LATEST_METRICS_CACHE.keys()):
-        expected_symbol = f"{coin}/USDT:USDT"
-        if expected_symbol not in TRACKED_COINS_ROUTER:
+        # Quick formatting lookup mapping strings safely
+        swap_sym = f"{coin}/USDT:USDT"
+        spot_sym = f"{coin}/USDT"
+        if swap_sym not in TRACKED_COINS_ROUTER and spot_sym not in TRACKED_COINS_ROUTER:
             continue
             
         data = LATEST_METRICS_CACHE[coin]
@@ -239,14 +216,15 @@ def build_premium_report_string():
             status_banner = "❌ *SHORT BLOCKED (Hyper-Bull)*"
         elif data['status'] == "WATCHING":
             status_banner = "⚠️ *EXHAUSTION DETECTED*"
+            
         msg += f"🪙 *Asset:* `{coin}` | *Price:* `{data['price']}`\n"
-        msg += f"🏢 *Exchange Route:* `{data['route']}`\n"
+        msg += f"🏢 *Market Route:* `{data['route']}`\n"
         msg += f"🔥 *Exhaustion Score:* `{data['score']:.1f}/100` | Status: {status_banner}\n"
         msg += f"📈 *RSI Metrics:* `15M:` {int(data['rsi_15m'])}  •  `5M:` {int(data['rsi_5m'])}  •  `1M:` {int(data['rsi_1m'])}\n"
         msg += "────────────────────\n"
     return msg
 
-# --- TELEGRAM COMMAND LINK CONTROLLER ---
+# --- TELEGRAM CONTROLLER WITH SMART FALLBACK ---
 def telegram_control_panel_listener():
     token = get_clean_env_var("TELEGRAM_TOKEN")
     chat_id = get_clean_env_var("TELEGRAM_CHAT_ID")
@@ -254,7 +232,7 @@ def telegram_control_panel_listener():
         return
 
     offset = 0
-    bot_instance = HybridExhaustionEngineV16()
+    bot_instance = HybridExhaustionEngineV18()
     
     while True:
         url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=20"
@@ -270,86 +248,105 @@ def telegram_control_panel_listener():
                             continue
 
                         if msg_text.startswith('/add '):
-                            raw_input = msg_text.replace('/add ', '').strip()
-                            full_symbol = clean_and_format_symbol(raw_input)
-                            if not full_symbol:
-                                continue
+                            raw_coin = msg_text.replace('/add ', '').strip().upper()
                             
-                            determined_exchange = None
-                            # 1. Probe OKX Markets
+                            swap_symbol = f"{raw_coin}/USDT:USDT"
+                            spot_symbol = f"{raw_coin}/USDT"
+                            
+                            determined_ex = None
+                            market_type = None
+                            final_symbol = None
+                            
+                            # Step A: Load market registries dynamically
                             try:
                                 if bot_instance.okx.markets is None: bot_instance.safe_api_call(bot_instance.okx, bot_instance.okx.load_markets)
-                                if full_symbol in bot_instance.okx.markets: determined_exchange = 'OKX'
+                                if bot_instance.gate.markets is None: bot_instance.safe_api_call(bot_instance.gate, bot_instance.gate.load_markets)
                             except Exception: pass
-                            
-                            # 2. Probe Gate.io Markets
-                            if not determined_exchange:
-                                try:
-                                    if bot_instance.gate.markets is None: bot_instance.safe_api_call(bot_instance.gate, bot_instance.gate.load_markets)
-                                    if full_symbol in bot_instance.gate.markets: determined_exchange = 'GATE'
-                                except Exception: pass
 
-                            if not determined_exchange:
-                                send_telegram_message(token, chat_id, f"❌ *{raw_input.upper()}* not found on OKX or Gate.io Swap lists!")
+                            # Step B: Route Logic Pipeline (Perpetual Futures Checks First)
+                            if swap_symbol in bot_instance.okx.markets:
+                                determined_ex, market_type, final_symbol = 'OKX', 'FUTURES', swap_symbol
+                            elif swap_symbol in bot_instance.gate.markets:
+                                determined_ex, market_type, final_symbol = 'GATE', 'FUTURES', swap_symbol
+                            
+                            # Step C: Fallback Route Pipeline (Spot Market Checks Second)
+                            elif spot_symbol in bot_instance.okx.markets:
+                                determined_ex, market_type, final_symbol = 'OKX', 'SPOT', spot_symbol
+                            elif spot_symbol in bot_instance.gate.markets:
+                                determined_ex, market_type, final_symbol = 'GATE', 'SPOT', spot_symbol
+
+                            if not determined_ex:
+                                send_telegram_message(token, chat_id, f"❌ *{raw_coin}* Spot ya Futures kisi me bhi OKX/Gate par nahi mila!")
                                 continue
 
-                            if full_symbol not in TRACKED_COINS_ROUTER:
-                                TRACKED_COINS_ROUTER[full_symbol] = determined_exchange
-                                PERSISTENCE_TRACKER[full_symbol] = 0
+                            if final_symbol not in TRACKED_COINS_ROUTER:
+                                TRACKED_COINS_ROUTER[final_symbol] = {'exchange': determined_ex, 'type': market_type}
+                                PERSISTENCE_TRACKER[final_symbol] = 0
                                 
-                                send_telegram_message(token, chat_id, f"⏳ Syncing *{raw_input.upper()}* metrics straight from *{determined_exchange}* network...")
-                                instant_metrics = bot_instance.evaluate_hybrid_asset(full_symbol, determined_exchange)
+                                send_telegram_message(token, chat_id, f"⏳ Syncing *{raw_coin}* via {determined_ex} ({market_type} Route)...")
+                                instant_metrics = bot_instance.evaluate_hybrid_asset(final_symbol, TRACKED_COINS_ROUTER[final_symbol])
                                 if instant_metrics:
-                                    LATEST_METRICS_CACHE[raw_input.upper()] = instant_metrics
-                                    send_telegram_message(token, chat_id, f"✅ *{raw_input.upper()}* fully synchronized on dashboard cards!")
+                                    LATEST_METRICS_CACHE[raw_coin] = instant_metrics
+                                    send_telegram_message(token, chat_id, f"✅ *{raw_coin}* successfully mapped onto the matrix cards!")
                                 else:
-                                    send_telegram_message(token, chat_id, f"⚠️ *{raw_input.upper()}* added to processing pipe queue.")
+                                    send_telegram_message(token, chat_id, f"⚠️ *{raw_coin}* added to pipeline, waiting for processing pass.")
                             else:
-                                send_telegram_message(token, chat_id, f"⚠️ *{raw_input.upper()}* is already active.")
+                                send_telegram_message(token, chat_id, f"⚠️ *{raw_coin}* is already active.")
 
                         elif msg_text.startswith('/remove '):
-                            raw_input = msg_text.replace('/remove ', '').strip()
-                            full_symbol = clean_and_format_symbol(raw_input)
-                            coin_display = raw_input.upper().split('/')[0]
-                            if full_symbol in TRACKED_COINS_ROUTER:
-                                del TRACKED_COINS_ROUTER[full_symbol]
-                                if full_symbol in PERSISTENCE_TRACKER: del PERSISTENCE_TRACKER[full_symbol]
-                                if coin_display in LATEST_METRICS_CACHE: del LATEST_METRICS_CACHE[coin_display]
-                                send_telegram_message(token, chat_id, f"🗑️ *{coin_display}* successfully removed.")
+                            raw_coin = msg_text.replace('/remove ', '').strip().upper()
+                            swap_symbol = f"{raw_coin}/USDT:USDT"
+                            spot_symbol = f"{raw_coin}/USDT"
+                            
+                            target_symbol = swap_symbol if swap_symbol in TRACKED_COINS_ROUTER else spot_symbol
+                            
+                            if target_symbol in TRACKED_COINS_ROUTER:
+                                del TRACKED_COINS_ROUTER[target_symbol]
+                                if target_symbol in PERSISTENCE_TRACKER: del PERSISTENCE_TRACKER[target_symbol]
+                                if raw_coin in LATEST_METRICS_CACHE: del LATEST_METRICS_CACHE[raw_coin]
+                                send_telegram_message(token, chat_id, f"🗑️ *{raw_coin}* successfully removed from monitoring memory grids.")
                             else:
-                                send_telegram_message(token, chat_id, f"❌ *{coin_display}* not active.")
+                                send_telegram_message(token, chat_id, f"❌ *{raw_coin}* active list me nahi mila.")
 
                         elif msg_text == '/list':
+                            if not TRACKED_COINS_ROUTER:
+                                send_telegram_message(token, chat_id, "📋 *Active Watchlist:* `Empty` (Use `/add`) ")
+                                continue
                             lines = []
                             for k, v in TRACKED_COINS_ROUTER.items():
-                                lines.append(f"{k.split('/')[0]} ({v})")
+                                lines.append(f"{k.split('/')[0]} ({v['exchange']}-{v['type']})")
                             send_telegram_message(token, chat_id, f"📋 *Active Routing System Grid:*\n`{', '.join(lines)}`")
 
                         elif msg_text == '/report':
                             send_telegram_message(token, chat_id, build_premium_report_string())
         except Exception as e:
-            print(f"[CONTROL PANEL CRITICAL ERROR] {e}")
+            print(f"[CONTROL PANEL ERROR] {e}")
         time.sleep(1)
 
 def run_bot_loop():
     TELEGRAM_TOKEN = get_clean_env_var("TELEGRAM_TOKEN")
     TELEGRAM_CHAT_ID = get_clean_env_var("TELEGRAM_CHAT_ID")
     
-    startup_msg = "🚀 *Refined Hybrid Scalper Bot V16 Live!*\nDual-Exchange Routing Engine Fully Streamlined. System Ready."
+    startup_msg = "🚀 *Smart Fallback Hybrid Scalper V18 Live!*\nNow automatically routing between Futures and Spot markets safely."
     send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, startup_msg)
 
-    bot = HybridExhaustionEngineV16()
+    bot = HybridExhaustionEngineV18()
     last_report_time = time.time()
 
     while True:
         active_router_snapshot = dict(TRACKED_COINS_ROUTER)
-        for asset, exchange_route in active_router_snapshot.items():
-            metrics = bot.evaluate_hybrid_asset(asset, exchange_route)
+        
+        if not active_router_snapshot:
+            time.sleep(5)
+            continue
+            
+        for asset, route_info in active_router_snapshot.items():
+            metrics = bot.evaluate_hybrid_asset(asset, route_info)
             if metrics:
                 clean_name = asset.split('/')[0]
                 LATEST_METRICS_CACHE[clean_name] = metrics
-                if metrics['status'] == "TRIGGER":
-                    alert_txt = f"🚨 *[HYBRID STRATEGY REVERSAL]* 🚨\n\n*Coin:* {clean_name}\n*Network:* {exchange_route}\n*Price:* {metrics['price']}\n*Exhaustion Score:* {metrics['score']:.1f}/100"
+                if metrics['status'] == "TRIGGER" and route_info['type'] == "FUTURES":
+                    alert_txt = f"🚨 *[FUTURES STRATEGY REVERSAL]* 🚨\n\n*Coin:* {clean_name}\n*Network:* {route_info['exchange']}\n*Price:* {metrics['price']}\n*Exhaustion Score:* {metrics['score']:.1f}/100"
                     send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, alert_txt)
             time.sleep(0.5)
 
@@ -360,12 +357,10 @@ def run_bot_loop():
         time.sleep(5)
 
 if __name__ == "__main__":
-    # Start web container listener for keeping Render host execution blocks active
     server_thread = Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
-    # Start independent Telegram outbound and inbound command pipes
     control_thread = Thread(target=telegram_control_panel_listener)
     control_thread.daemon = True
     control_thread.start()
