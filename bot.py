@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-from datetime import datetime  # <-- FIXED: Missing datetime import module added here!
+from datetime import datetime
 import json
 import html
 import hashlib
@@ -29,7 +29,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Quant War Room Hybrid V21 Engine is Active.", 200
+    return "Quant War Room Hybrid V22 Engine is Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -55,7 +55,7 @@ if not TOKEN or not USER_CHAT_ID:
     logging.critical("ENVIRONMENT CONFIGURATION ERROR: Clean system tokens missing. Core execution aborted.")
     sys.exit(1)
 
-# --- GLOBAL WATCHLIST CONFIG (BLANK STARTUP) ---
+# --- GLOBAL WATCHLIST CONFIG ---
 TRACKED_COINS_ROUTER = {}
 PERSISTENCE_TRACKER = {}
 LATEST_METRICS_CACHE = {}
@@ -73,7 +73,7 @@ def send_telegram_message(text):
         return None
 
 # --- HYBRID QUANT ENGINE ---
-class RefinedQuantEngineV21:
+class RefinedQuantEngineV22:
     def __init__(self):
         self.okx = ccxt.okx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
         self.gate = ccxt.gate({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
@@ -105,7 +105,7 @@ class RefinedQuantEngineV21:
             
             order_flow_status = "BALANCED"
             if top_bid_val > (top_ask_val * 1.8): order_flow_status = "BUY WALL"
-            elif top_ask_val > (top_ask_val * 1.8): order_flow_status = "SELL WALL"
+            elif top_ask_val > (top_bid_val * 1.8): order_flow_status = "SELL WALL"
             
             weighted_bids = sum(qty * np.exp(-abs(price - mid_price) / (spread * 5)) for price, qty in bids[:10])
             weighted_asks = sum(qty * np.exp(-abs(price - mid_price) / (spread * 5)) for price, qty in asks[:10])
@@ -226,10 +226,12 @@ class RefinedQuantEngineV21:
         else:
             PERSISTENCE_TRACKER[symbol] = 0
 
+        # FIXED: Explicitly injecting routed network metadata into output fields to avoid key errors
         return {
             "status": report_status, "score": score, "price": live_price,
             "whale_flow": whale_flow, "orderbook": orderbook_status,
-            "trend": trend_regime, "momentum": momentum_strength, "exchange": f"{ex_name} ({m_type})"
+            "trend": trend_regime, "momentum": momentum_strength, 
+            "exchange": f"{ex_name} ({m_type})", "route": f"{ex_name} ({m_type})"
         }
 
 # --- PREMIUM VISUAL CARD FORMATTER ---
@@ -250,7 +252,7 @@ def build_premium_war_room_card(coin, data):
     msg += f"🏦 <b>Orderbook</b> ➜ {data['orderbook']}\n"
     msg += f"📡 <b>Trend</b> ➜ {data['trend']}\n"
     msg += f"⚡ <b>Momentum</b> ➜ {data['momentum']}\n\n"
-    msg += f"📊 <b>Engine Score Matrix:</b> <code>{abs_score}/100</code> via <code>{data['exchange']}</code>\n\n"
+    msg += f"📊 <b>Engine Score Matrix:</b> <code>{abs_score}/100</code> via <code>{data.get('route', 'Hybrid Source')}</code>\n\n"
     msg += "🤖 <b>AI Verdict:</b> \n"
     msg += f"• Matrix Shift: <code>{'MATCHED' if abs_score > 60 else 'STABLE'}</code>\n"
     msg += f"• Flows: <code>{'DOMINATING' if data['whale_flow'] != 'BALANCED' else 'CONSOLIDATING'}</code>\n\n"
@@ -280,16 +282,19 @@ def build_premium_report_string():
         elif data['status'] == "WATCHING" or data['status'] == "SCAN":
             if abs(data['score']) > 45: status_banner = "⚠️ EXHAUSTION DETECTED"
             
+        # FIXED: Utilizing .get() fallback system to guarantee zero runtime KeyErrors
+        market_route = data.get('route', data.get('exchange', 'Hybrid Dynamic'))
+        
         msg += f"🪙 <b>Asset:</b> <code>{coin}</code> | <b>Price:</b> <code>{data['price']}</code>\n"
-        msg += f"🏢 <b>Market Route:</b> <code>{data['route']}</code>\n"
-        msg += f"🔥 <b>Exhaustion Score:</b> <code>{abs(int(data['score']))}/100 electro</code> | Status: {status_banner}\n"
+        msg += f"🏢 <b>Market Route:</b> <code>{market_route}</code>\n"
+        msg += f"🔥 <b>Exhaustion Score:</b> <code>{abs(int(data['score']))}/100</code> | Status: {status_banner}\n"
         msg += "────────────────────\n"
     return msg
 
 # --- TELEGRAM DECK MANAGER ---
 def telegram_control_panel_listener():
     offset = 0
-    bot_instance = RefinedQuantEngineV21()
+    bot_instance = RefinedQuantEngineV22()
     
     while True:
         url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20"
@@ -361,7 +366,7 @@ def telegram_control_panel_listener():
         time.sleep(1)
 
 def run_bot_loop():
-    bot = RefinedQuantEngineV21()
+    bot = RefinedQuantEngineV22()
     last_report_time = time.time()
 
     while True:
@@ -389,7 +394,7 @@ def run_bot_loop():
 if __name__ == "__main__":
     Thread(target=run_web_server, daemon=True).start()
     
-    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v21.0 STARTED SUCCESSFULLY</b>\nTokens parsed flawlessly. Blank matrix active. Awaiting /add commands in chat, Bhai!"
+    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v22.0 STARTED SUCCESSFULLY</b>\nTokens parsed flawlessly. Blank matrix active. Awaiting /add commands in chat, Bhai!"
     send_telegram_message(startup_msg)
     
     Thread(target=telegram_control_panel_listener, daemon=True).start()
