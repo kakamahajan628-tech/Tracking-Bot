@@ -1,34 +1,25 @@
-import os
-import sys
 import time
-from datetime import datetime, timedelta
-import json
-import html
-import hashlib
-import asyncio
-import logging
-import aiohttp
-import numpy as np
-import pandas as pd
-import ta
-import requests
+from datetime import datetime
 import ccxt
+import pandas as pd
+import numpy as np
+import ta
+import os
+import requests
 from threading import Thread
 from flask import Flask
-from scipy.signal import find_peaks
 
-# --- LOGGING ENVIRONMENT SETUP ---
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    stream=sys.stdout
-)
+# --- GLOBAL TRACKING REGISTRY ---
+# Stores the combination of exchange and specific market type (SWAP or SPOT)
+TRACKED_COINS_ROUTER = {}
+PERSISTENCE_TRACKER = {}
+LATEST_METRICS_CACHE = {}
 
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Quant War Room Hybrid V27 Anti-Oscillation Engine is Active.", 200
+    return "Institutional Scalper V18 Smart Routing Active.", 200
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -43,79 +34,54 @@ def get_clean_env_var(key):
         clean_val = clean_val.replace(char, '')
     return clean_val
 
-TOKEN = get_clean_env_var("TELEGRAM_TOKEN")
-raw_chat_id = get_clean_env_var("TELEGRAM_CHAT_ID") or get_clean_env_var("USER_CHAT_ID")
-USER_CHAT_ID = int(raw_chat_id) if (raw_chat_id and str(raw_chat_id).strip().isdigit()) else None
-
-if not TOKEN or not USER_CHAT_ID:
-    logging.critical("ENVIRONMENT CONFIGURATION ERROR: System setup aborted.")
-    sys.exit(1)
-
-# --- ADVANCED QUANT REGISTRIES ---
-TRACKED_COINS_ROUTER = {}
-LATEST_METRICS_CACHE = {}
-
-LAST_SENT_ALERT_STATE = {}     # State memory tracking
-SIGNAL_CONFIRMATION = {}       # Consecutive cycle tracking matrix
-ALERT_COOLDOWN = {}            # 30-Min timestamp lock pool
-
-def send_telegram_message(text):
-    clean_token = TOKEN.replace('https://api.telegram.org/bot', '').replace('bot', '').strip()
+def send_telegram_message(token, chat_id, text):
+    if not token or not chat_id:
+        return
+    clean_token = token.replace('https://api.telegram.org/bot', '').replace('bot', '').strip()
     url = f"https://api.telegram.org/bot{clean_token}/sendMessage"
-    payload = {"chat_id": str(USER_CHAT_ID), "text": text, "parse_mode": "HTML"}
+    payload = {"chat_id": str(chat_id).strip(), "text": text, "parse_mode": "Markdown"}
     try:
-        res = requests.post(url, json=payload, timeout=12)
-        return res.json()
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        logging.error(f"[TELEGRAM ERROR] Transport failed: {e}")
-        return None
+        print(f"[TELEGRAM ERROR] Transport failed: {e}")
 
-# --- HYBRID REFINED QUANT MATRIX ENGINE ---
-class RefinedQuantEngineV27:
+# --- HYBRID ROUTER ENGINE CORE ---
+class HybridExhaustionEngineV18:
     def __init__(self):
-        self.okx = ccxt.okx({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
-        self.gate = ccxt.gate({'enableRateLimit': True, 'options': {'defaultType': 'swap'}, 'timeout': 15000})
+        # We handle multi-market parameters dynamically inside the endpoints calls now
+        self.okx = ccxt.okx({
+            'enableRateLimit': True,
+            'timeout': 15000,
+            'headers': {'User-Agent': 'Mozilla/5.0'}
+        })
+        self.gate = ccxt.gate({
+            'enableRateLimit': True,
+            'timeout': 15000,
+            'headers': {'User-Agent': 'Mozilla/5.0'}
+        })
         self.timeframes = ['1m', '5m', '15m']
 
     def safe_api_call(self, exchange_instance, func, *args, **kwargs):
         for attempt in range(3):
             try:
                 return func(*args, **kwargs)
+            except ccxt.RateLimitExceeded:
+                time.sleep(4)
+            except (ccxt.NetworkError, ccxt.RequestTimeout):
+                time.sleep(2)
             except Exception as e:
-                if attempt == 2:
-                    logging.debug(f"[EXCHANGE TIMEOUT] Bypassed network block: {e}")
-                time.sleep(1)
+                print(f"[API EXCEPTION] Safely bypassed: {e}")
+                return None
         return None
 
-    def analyze_orderbook_pressure(self, exchange_instance, symbol):
+    def analyze_volume_climax(self, exchange_instance, symbol):
         try:
-            orderbook = self.safe_api_call(exchange_instance, exchange_instance.fetch_order_book, symbol, limit=20)
-            if not orderbook or not orderbook.get('bids') or not orderbook.get('asks'):
-                return 50.0, 50.0, "BALANCED"
-                
-            bids, asks = orderbook['bids'], orderbook['asks']
-            best_bid, best_ask = bids[0][0], asks[0][0]
-            mid_price = (best_bid + best_ask) / 2.0
-            spread = max(best_ask - best_bid, mid_price * 0.0001)
-            
-            top_bid_val = sum(p * q for p, q in bids[:5])
-            top_ask_val = sum(p * q for p, q in asks[:5])
-            
-            order_flow_status = "BALANCED"
-            if top_bid_val > (top_ask_val * 1.8): order_flow_status = "BUY WALL FOUND 🏰"
-            elif top_ask_val > (top_bid_val * 1.8): order_flow_status = "SELL WALL FOUND 🧱"
-            
-            weighted_bids = sum(qty * np.exp(-abs(price - mid_price) / (spread * 5)) for price, qty in bids[:10])
-            weighted_asks = sum(qty * np.exp(-abs(price - mid_price) / (spread * 5)) for price, qty in asks[:10])
-            
-            total_v = weighted_bids + weighted_asks
-            if total_v <= 0: return 50.0, 50.0, "BALANCED"
-            
-            bid_pct = (weighted_bids / total_v) * 100
-            ask_pct = 100.0 - bid_pct
-            return round(bid_pct, 1), round(ask_pct, 1), order_flow_status
+            ticker = self.safe_api_call(exchange_instance, exchange_instance.fetch_ticker, symbol)
+            if ticker and 'baseVolume' in ticker:
+                return float(ticker['baseVolume'])
+            return None
         except Exception:
-            return 50.0, 50.0, "BALANCED"
+            return None
 
     def get_confirmed_pivots(self, df, left_bars=4, right_bars=4):
         highs = df['high'].values
@@ -131,42 +97,35 @@ class RefinedQuantEngineV27:
                 pivot_lows.append((i, lows[i]))
         return pivot_highs, pivot_lows
 
-    def check_market_structure_shift(self, df):
+    def analyze_divergence_and_mss(self, df):
         p_highs, p_lows = self.get_confirmed_pivots(df)
         closes = df['close'].values
-        macd_hist = df['macd_hist'].values
-        
+        rsi = df['rsi'].values
         mss = False
         if p_lows:
             last_low = p_lows[-1][1]
             if closes[-1] < last_low and closes[-2] < last_low:
                 mss = True
-                
         bearish_div = False
         if len(p_highs) >= 2:
             idx1, peak1 = p_highs[-2]
             idx2, peak2 = p_highs[-1]
-            if idx2 < len(macd_hist) and idx1 < len(macd_hist):
-                if peak2 > peak1 and macd_hist[idx2] < macd_hist[idx1]:
+            if idx2 < len(rsi) and idx1 < len(rsi):
+                if peak2 > peak1 and rsi[idx2] < rsi[idx1]:
                     bearish_div = True
-                    
         return mss, bearish_div
 
     def run_quantitative_indicators(self, df):
         df['ema_20'] = ta.trend.ema_indicator(df['close'], window=20)
         df['ema_50'] = ta.trend.ema_indicator(df['close'], window=50)
-        df['ema_200'] = ta.trend.ema_indicator(df['close'], window=200)
         df['adx'] = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
+        df['rsi'] = ta.momentum.rsi(df['close'], window=14)
         df['macd_hist'] = ta.trend.MACD(df['close']).macd_diff()
         df['atr'] = ta.volatility.average_true_range(df['high'], df['low'], df['close'], window=14)
-        
-        bb = ta.volatility.BollingerBands(close=df['close'], window=20)
-        df['bb_high'] = bb.bollinger_hband()
-        df['bb_low'] = bb.bollinger_lband()
-        df['bb_mid'] = bb.bollinger_mavg()
         return df
 
     def evaluate_hybrid_asset(self, symbol, route_info):
+        """Processes calculations dynamically across configured spot or swap parameters."""
         ex_name = route_info['exchange']
         m_type = route_info['type']
         ex = self.okx if ex_name == 'OKX' else self.gate
@@ -178,7 +137,7 @@ class RefinedQuantEngineV27:
         
         tf_data = {}
         for tf in self.timeframes:
-            candles = self.safe_api_call(ex, ex.fetch_ohlcv, symbol, tf, limit=150)
+            candles = self.safe_api_call(ex, ex.fetch_ohlcv, symbol, tf, limit=250)
             if not candles or len(candles) < 60:
                 return None
             df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -187,185 +146,96 @@ class RefinedQuantEngineV27:
 
         m1_df, m5_df, m15_df = tf_data['1m'], tf_data['5m'], tf_data['15m']
         i1, i5, i15 = m1_df.index[-1], m5_df.index[-1], m15_df.index[-1]
-        p_i1 = m1_df.index[-2]
+        p_i1, p_i15 = m1_df.index[-2], m15_df.index[-2]
         
-        m1_mss, m1_div = self.check_market_structure_shift(m1_df)
-        m5_mss, _ = self.check_market_structure_shift(m5_df)
-        m15_mss, _ = self.check_market_structure_shift(m15_df)
-        
-        sync_count = 0
-        m1_status, m5_status, m15_status = "SIDE ⏳", "SIDE ⏳", "SIDE ⏳"
-        
-        if m1_mss or m1_div or m1_df.loc[i1, 'macd_hist'] < 0:
-            sync_count += 1
-            m1_status = "BULLISH ✅" if m1_df.loc[i1, 'close'] > m1_df.loc[i1, 'ema_50'] else "BEARISH ❌"
-        else:
-            m1_status = "BULLISH ✅" if m1_df.loc[i1, 'close'] > m1_df.loc[i1, 'ema_50'] else "BEARISH ❌"
-            
-        if m5_mss or m5_df.loc[i5, 'macd_hist'] < 0:
-            sync_count += 1
-            m5_status = "BULLISH ✅" if m5_df.loc[i5, 'close'] > m5_df.loc[i5, 'ema_50'] else "BEARISH ❌"
-        else:
-            m5_status = "BULLISH ✅" if m5_df.loc[i5, 'close'] > m5_df.loc[i5, 'ema_50'] else "BEARISH ❌"
+        m1_mss, m1_div = self.analyze_divergence_and_mss(m1_df)
+        m5_mss, _ = self.analyze_divergence_and_mss(m5_df)
+        m15_mss, _ = self.analyze_divergence_and_mss(m15_df)
 
-        if m15_mss or m15_df.loc[i15, 'macd_hist'] < 0:
-            sync_count += 1
-            m15_status = "BULLISH ✅" if m15_df.loc[i15, 'close'] > m15_df.loc[i15, 'ema_50'] else "BEARISH ❌"
-        else:
-            m15_status = "BULLISH ✅" if m15_df.loc[i15, 'close'] > m15_df.loc[i15, 'ema_50'] else "BEARISH ❌"
-
-        bid_p, ask_p, orderbook_status = self.analyze_orderbook_pressure(ex, symbol)
-        imbalance_delta = abs(bid_p - ask_p)
-
-        # --- FIX 4: STABLE SCORED MATRIX ROUTER INTERFACE ---
         score = 0
-        if m15_df.loc[i15, 'close'] < m15_df.loc[i15, 'ema_50']: score -= 35   # Anchor Trend (35 Pts)
-        else: score += 35
-        
-        if m5_mss: score -= 25                                                  # Market Shift (25 Pts)
-        else: score += 15
-        
-        if m1_div: score -= 15                                                  # Micro Divs (15 Pts)
-        
-        if orderbook_status == "SELL WALL FOUND 🧱": score -= 15                # Orderbook Walls (15 Pts)
-        elif orderbook_status == "BUY WALL FOUND 🏰": score += 15
+        if m1_mss: score += 10
+        if m5_mss: score += 25
+        if m15_mss: score += 35
+        if m1_div: score += 15
         
         macd_weakening_1m = m1_df.loc[i1, 'macd_hist'] < m1_df.loc[p_i1, 'macd_hist']
-        if macd_weakening_1m: score -= 10                                       # Velocity Delta (10 Pts)
-        else: score += 10
+        if m1_df.loc[i1, 'rsi'] > 70 and macd_weakening_1m:
+            score += 15
+            
+        atr_ma_50 = m1_df['atr'].tail(50).mean()
+        atr_ratio = m1_df.loc[i1, 'atr'] / atr_ma_50 if atr_ma_50 > 0 else 1.0
+        if atr_ratio > 1.5:
+            score += 10
 
-        # Velocity / Speed Calculation
-        macd_slope = m5_df.loc[i5, 'macd_hist'] - m5_df.loc[i5-1, 'macd_hist']
-        if abs(macd_slope) > 0:
-            velocity_vector = "+12.4% FIRE 🔥" if macd_slope > 0 else "-14.2% CRASH 📉"
+        price_up_15m = m15_df.loc[i15, 'close'] > m15_df.loc[p_i15, 'close']
+        base_volume = self.analyze_volume_climax(ex, symbol)
+        if base_volume and price_up_15m:
+            score += 15
+
+        hyper_bullish_15m = m15_df.loc[i15, 'ema_20'] > m15_df.loc[i15, 'ema_50'] and m15_df.loc[i15, 'adx'] > 32 and m15_df.loc[i15, 'rsi'] > 65
+        if hyper_bullish_15m and not m5_mss:
+            if symbol in PERSISTENCE_TRACKER: PERSISTENCE_TRACKER[symbol] = 0
+            return {"status": "BLOCKED", "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi'], "route": f"{ex_name} ({m_type})"}
+
+        if symbol not in PERSISTENCE_TRACKER:
+            PERSISTENCE_TRACKER[symbol] = 0
+
+        if score >= 75:
+            PERSISTENCE_TRACKER[symbol] += 1
         else:
-            velocity_vector = "STABLE"
+            PERSISTENCE_TRACKER[symbol] = 0
 
-        # Regime Mapping
-        if m15_df.loc[i15, 'close'] > m15_df.loc[i15, 'bb_high']:
-            structure_regime = "EXHAUSTED PARABOLIC 🛑"
-            momentum_state = "OVERHEATED"
-            trend_health = "91 / 100"
-        else:
-            structure_regime = "NORMAL RANGING INFRASTRUCTURE"
-            momentum_state = "STABLE"
-            trend_health = f"{abs(score)} / 100"
+        report_status = "NORMAL"
+        if score >= 75 and PERSISTENCE_TRACKER[symbol] >= 3:
+            report_status = "TRIGGER"
+            PERSISTENCE_TRACKER[symbol] = 0
+        elif score >= 50:
+            report_status = "WATCHING"
 
-        is_bullish = (live_price > m1_df.loc[i1, 'ema_50']) if len(m1_df['ema_50']) > 0 else False
-        whale_flow = "DISTRIBUTION 🔴" if score < 0 else "ACCUMULATION 🟢"
-        large_orders = "SELLING" if score < 0 else "BUYING"
-        absorption = "ACTIVE" if abs(bid_p - ask_p) > 20 else "LOW"
-        trap_risk = "HIGH ⚠️" if m1_div or m5_mss else "LOW"
-
-        proximity_gap = 0.15
-        entry_zone_status = "OPTIMAL 🛡️" if proximity_gap < 0.5 else "EXTENDED ⚠️"
-
-        # Hard boundaries mapping for final trades selection
-        report_status = "SCAN"
-        if score <= -70:
-            report_status = "SHORT_THOKO"
-        elif score >= 70:
-            report_status = "LONG_THOKO"
-
-        shifted_time = datetime.utcnow() - timedelta(minutes=2)
-        utc_timestamp_str = shifted_time.strftime('%H:%M:%S UTC')
-
-        return {
-            "status": report_status, "price": live_price, "score_raw": score,
-            "venue": f"{ex_name} {m_type}".upper(), "updated_time": utc_timestamp_str,
-            "velocity": velocity_vector, "regime": structure_regime,
-            "trend_health": trend_health, "momentum": momentum_state,
-            "bids": f"{int(bid_p)}%", "asks": f"{int(ask_p)}%",
-            "book_delta": f"{'+' if bid_p > ask_p else '-'}{imbalance_delta:.0f}% 🟢",
-            "wall_detection": orderbook_status, "liquidity_void": "NONE",
-            "whale_flow": whale_flow, "large_orders": large_orders,
-            "absorption": absorption, "trap_risk": trap_risk,
-            "m1_node": m1_status, "m5_node": m5_status, "m15_node": m15_status,
-            "sync_score": f"{sync_count} / 3 🟢" if sync_count >= 2 else f"{sync_count} / 3 ⏳",
-            "entry_zone": entry_zone_status, "rr_profile": "1 : 2.8" if report_status == "SHORT_THOKO" else "1 : 3.2",
-            "stop_distance": "LOW", "confidence": "93%" if abs(score) >= 70 else "65%"
-        }
-
-# --- TELEGRAM CARDS UI LAYOUT ---
-def build_premium_war_room_card(coin, data):
-    execution_verdict = "WAIT & SCAN"
-    if data['status'] == "LONG_THOKO": execution_verdict = "LONG THOKO 🟢"
-    elif data['status'] == "SHORT_THOKO": execution_verdict = "SHORT THOKO 🔴"
-    
-    msg = f"🛰️ <b>QUANT WAR ROOM :: {coin}/USDT</b>\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    msg += f"💰 <b>PRICE</b>        ➜ ${data['price']}\n"
-    msg += f"🏢 <b>VENUE</b>        ➜ {data['venue']}\n"
-    msg += f"🕒 <b>UPDATED</b>      ➜ {data['updated_time']}\n\n"
-    
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "🧠 <b>AI STATE</b>\n\n"
-    msg += f"⚡ <b>VELOCITY</b>     ➜ {data['velocity']}\n"
-    msg += f"📡 <b>REGIME</b>       ➜ {data['regime']}\n"
-    msg += f"🎯 <b>TREND HEALTH</b> ➜ {data['trend_health']}\n"
-    msg += f"🔋 <b>MOMENTUM</b>     ➜ {data['momentum']}\n\n"
-    
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "<b>🏦 LIQUIDITY MAP</b>\n\n"
-    msg += f"<b>BIDS</b>           ➜ {data['bids']}\n"
-    msg += f"<b>ASKS</b>           ➜ {data['asks']}\n\n"
-    msg += f"<b>BOOK DELTA</b>     ➜ {data['book_delta']}\n"
-    msg += f"<b>WALL DETECTION</b> ➜ {data['wall_detection']}\n"
-    msg += f"<b>LIQUIDITY VOID</b> ➜ {data['liquidity_void']}\n\n"
-    
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "🐋 <b>SMART MONEY</b>\n\n"
-    msg += f"<b>WHALE FLOW</b>     ➜ {data['whale_flow']}\n"
-    msg += f"<b>LARGE ORDERS</b>   ➜ {data['large_orders']}\n"
-    msg += f"<b>ABSORPTION</b>     ➜ {data['absorption']}\n"
-    msg += f"<b>TRAP RISK</b>      ➜ {data['trap_risk']}\n\n"
-    
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "📈 <b>TIMEFRAME MATRIX</b>\n\n"
-    msg += f"<b>1M</b>  ➜ {data['m1_node']}\n"
-    msg += f"<b>5M</b>  ➜ {data['m5_node']}\n"
-    msg += f"<b>15M</b> ➜ {data['m15_node']}\n\n"
-    msg += f"<b>SYNC SCORE</b> ➜ {data['sync_score']}\n\n"
-    
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "🎯 <b>TRADE ENGINE</b>\n\n"
-    msg += f"<b>ENTRY ZONE</b>     ➜ {data['entry_zone']}\n"
-    msg += f"<b>R:R PROFILE</b>    ➜ {data['rr_profile']}\n"
-    msg += f"<b>STOP DISTANCE</b>  ➜ {data['stop_distance']}\n"
-    msg += f"<b>CONFIDENCE</b>     ➜ {data['confidence']}\n\n"
-    
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "🚨 <b>AI CONCLUSION</b>\n\n"
-    msg += f"PARABOLIC CONFLUENCE CAPTURED\n"
-    msg += f"DISTRIBUTION MATRIX COMPILING\n"
-    msg += f"VOLATILITY INGESTION BOUNDS ACTIVE\n\n"
-    msg += f"🎯 <b>EXECUTION ➜ {execution_verdict}</b>\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━"
-    return msg
+        return {"status": report_status, "score": score, "price": live_price, "rsi_15m": m15_df.loc[i15, 'rsi'], "rsi_5m": m5_df.loc[i5, 'rsi'], "rsi_1m": m1_df.loc[i1, 'rsi'], "route": f"{ex_name} ({m_type})"}
 
 def build_premium_report_string():
     if not TRACKED_COINS_ROUTER:
-        return "📋 <b>Watchlist Khali Hai!</b> Chat me <code>/add [coin]</code> karke scanning shuru karein bhai."
+        return "📋 *Watchlist Khali Hai!* Chat me `/add [coin]` karke scanning shuru karein bhai."
     if not LATEST_METRICS_CACHE:
-        return "⏳ <b>Bhai, data sync ho raha hai.</b> Please wait 1 cycle."
-    
+        return "⏳ *Bhai, data sync ho raha hai.* Please wait 1 cycle."
+        
     timestamp = datetime.now().strftime('%H:%M:%S')
-    msg = f"📊 <b>[ QUANT WAR ROOM SNAPSHOT — {timestamp} ]</b>\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg = f"📊 *[SMART ROUTING WATCHLIST — {timestamp}]*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
     for coin in list(LATEST_METRICS_CACHE.keys()):
+        # Quick formatting lookup mapping strings safely
+        swap_sym = f"{coin}/USDT:USDT"
+        spot_sym = f"{coin}/USDT"
+        if swap_sym not in TRACKED_COINS_ROUTER and spot_sym not in TRACKED_COINS_ROUTER:
+            continue
+            
         data = LATEST_METRICS_CACHE[coin]
-        v_verdict = "SCAN ⏳"
-        if data['status'] == "LONG_THOKO": v_verdict = "LONG 🟢"
-        elif data['status'] == "SHORT_THOKO": v_verdict = "SHORT 🔴"
-        msg += f"🪙 <b>{coin}</b> | <code>${data['price']}</code> | <code>{v_verdict}</code> (Health: {data['trend_health']})\n"
+        status_banner = "🟢 *TREND INTACT*"
+        if data['status'] == "BLOCKED":
+            status_banner = "❌ *SHORT BLOCKED (Hyper-Bull)*"
+        elif data['status'] == "WATCHING":
+            status_banner = "⚠️ *EXHAUSTION DETECTED*"
+            
+        msg += f"🪙 *Asset:* `{coin}` | *Price:* `{data['price']}`\n"
+        msg += f"🏢 *Market Route:* `{data['route']}`\n"
+        msg += f"🔥 *Exhaustion Score:* `{data['score']:.1f}/100` | Status: {status_banner}\n"
+        msg += f"📈 *RSI Metrics:* `15M:` {int(data['rsi_15m'])}  •  `5M:` {int(data['rsi_5m'])}  •  `1M:` {int(data['rsi_1m'])}\n"
+        msg += "────────────────────\n"
     return msg
 
+# --- TELEGRAM CONTROLLER WITH SMART FALLBACK ---
 def telegram_control_panel_listener():
+    token = get_clean_env_var("TELEGRAM_TOKEN")
+    chat_id = get_clean_env_var("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+
     offset = 0
-    bot_instance = RefinedQuantEngineV27()
+    bot_instance = HybridExhaustionEngineV18()
     
     while True:
-        url = f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}&timeout=20"
+        url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=20"
         try:
             response = requests.get(url, timeout=25).json()
             if "result" in response:
@@ -374,73 +244,98 @@ def telegram_control_panel_listener():
                     if "message" in update and "text" in update["message"]:
                         msg_text = update["message"]["text"].strip()
                         incoming_chat_id = str(update["message"]["chat"]["id"])
-                        if incoming_chat_id != str(USER_CHAT_ID).strip(): continue
+                        if incoming_chat_id != str(chat_id).strip():
+                            continue
 
                         if msg_text.startswith('/add '):
                             raw_coin = msg_text.replace('/add ', '').strip().upper()
-                            swap_symbol, spot_symbol = f"{raw_coin}/USDT:USDT", f"{raw_coin}/USDT"
-                            determined_ex, market_type, final_symbol = None, None, None
                             
+                            swap_symbol = f"{raw_coin}/USDT:USDT"
+                            spot_symbol = f"{raw_coin}/USDT"
+                            
+                            determined_ex = None
+                            market_type = None
+                            final_symbol = None
+                            
+                            # Step A: Load market registries dynamically
                             try:
                                 if bot_instance.okx.markets is None: bot_instance.safe_api_call(bot_instance.okx, bot_instance.okx.load_markets)
                                 if bot_instance.gate.markets is None: bot_instance.safe_api_call(bot_instance.gate, bot_instance.gate.load_markets)
                             except Exception: pass
 
-                            if swap_symbol in bot_instance.okx.markets: determined_ex, market_type, final_symbol = 'OKX', 'FUTURES', swap_symbol
-                            elif swap_symbol in bot_instance.gate.markets: determined_ex, market_type, final_symbol = 'GATE', 'FUTURES', swap_symbol
-                            elif spot_symbol in bot_instance.okx.markets: determined_ex, market_type, final_symbol = 'OKX', 'SPOT', spot_symbol
-                            elif spot_symbol in bot_instance.gate.markets: determined_ex, market_type, final_symbol = 'GATE', 'SPOT', spot_symbol
+                            # Step B: Route Logic Pipeline (Perpetual Futures Checks First)
+                            if swap_symbol in bot_instance.okx.markets:
+                                determined_ex, market_type, final_symbol = 'OKX', 'FUTURES', swap_symbol
+                            elif swap_symbol in bot_instance.gate.markets:
+                                determined_ex, market_type, final_symbol = 'GATE', 'FUTURES', swap_symbol
+                            
+                            # Step C: Fallback Route Pipeline (Spot Market Checks Second)
+                            elif spot_symbol in bot_instance.okx.markets:
+                                determined_ex, market_type, final_symbol = 'OKX', 'SPOT', spot_symbol
+                            elif spot_symbol in bot_instance.gate.markets:
+                                determined_ex, market_type, final_symbol = 'GATE', 'SPOT', spot_symbol
 
                             if not determined_ex:
-                                send_telegram_message(f"❌ <b>{raw_coin}</b> OKX ya Gate.io par nahi mila!")
+                                send_telegram_message(token, chat_id, f"❌ *{raw_coin}* Spot ya Futures kisi me bhi OKX/Gate par nahi mila!")
                                 continue
 
                             if final_symbol not in TRACKED_COINS_ROUTER:
                                 TRACKED_COINS_ROUTER[final_symbol] = {'exchange': determined_ex, 'type': market_type}
-                                send_telegram_message(f"⏳ Loading War Room Matrices for <b>{raw_coin}</b>...")
-                                instant_m = bot_instance.evaluate_hybrid_asset(final_symbol, TRACKED_COINS_ROUTER[final_symbol])
-                                if instant_m:
-                                    LATEST_METRICS_CACHE[raw_coin] = instant_m
-                                    send_telegram_message(build_premium_war_room_card(raw_coin, instant_m))
+                                PERSISTENCE_TRACKER[final_symbol] = 0
+                                
+                                send_telegram_message(token, chat_id, f"⏳ Syncing *{raw_coin}* via {determined_ex} ({market_type} Route)...")
+                                instant_metrics = bot_instance.evaluate_hybrid_asset(final_symbol, TRACKED_COINS_ROUTER[final_symbol])
+                                if instant_metrics:
+                                    LATEST_METRICS_CACHE[raw_coin] = instant_metrics
+                                    send_telegram_message(token, chat_id, f"✅ *{raw_coin}* successfully mapped onto the matrix cards!")
                                 else:
-                                    send_telegram_message(f"✅ <b>{raw_coin}</b> added to tracking system channels.")
+                                    send_telegram_message(token, chat_id, f"⚠️ *{raw_coin}* added to pipeline, waiting for processing pass.")
                             else:
-                                send_telegram_message(f"⚠️ <b>{raw_coin}</b> is already active.")
+                                send_telegram_message(token, chat_id, f"⚠️ *{raw_coin}* is already active.")
 
                         elif msg_text.startswith('/remove '):
                             raw_coin = msg_text.replace('/remove ', '').strip().upper()
-                            swap_sym, spot_sym = f"{raw_coin}/USDT:USDT", f"{raw_coin}/USDT"
-                            target_symbol = swap_sym if swap_sym in TRACKED_COINS_ROUTER else spot_sym
+                            swap_symbol = f"{raw_coin}/USDT:USDT"
+                            spot_symbol = f"{raw_coin}/USDT"
+                            
+                            target_symbol = swap_symbol if swap_symbol in TRACKED_COINS_ROUTER else spot_symbol
+                            
                             if target_symbol in TRACKED_COINS_ROUTER:
                                 del TRACKED_COINS_ROUTER[target_symbol]
+                                if target_symbol in PERSISTENCE_TRACKER: del PERSISTENCE_TRACKER[target_symbol]
                                 if raw_coin in LATEST_METRICS_CACHE: del LATEST_METRICS_CACHE[raw_coin]
-                                if raw_coin in LAST_SENT_ALERT_STATE: del LAST_SENT_ALERT_STATE[raw_coin]
-                                if raw_coin in SIGNAL_CONFIRMATION: del SIGNAL_CONFIRMATION[raw_coin]
-                                if raw_coin in ALERT_COOLDOWN: del ALERT_COOLDOWN[raw_coin]
-                                send_telegram_message(f"🗑️ <b>{raw_coin}</b> cleanly removed from matrices.")
+                                send_telegram_message(token, chat_id, f"🗑️ *{raw_coin}* successfully removed from monitoring memory grids.")
                             else:
-                                send_telegram_message(f"❌ <b>{raw_coin}</b> active list me nahi mila.")
+                                send_telegram_message(token, chat_id, f"❌ *{raw_coin}* active list me nahi mila.")
 
                         elif msg_text == '/list':
                             if not TRACKED_COINS_ROUTER:
-                                send_telegram_message("📋 <b>Active Watchlist:</b> <code>Khali Hai</code>")
+                                send_telegram_message(token, chat_id, "📋 *Active Watchlist:* `Empty` (Use `/add`) ")
                                 continue
-                            lines = [f"{k.split('/')[0]} ({v['exchange']}-{v['type']})" for k, v in TRACKED_COINS_ROUTER.items()]
-                            send_telegram_message(f"📋 <b>Active Telemetry Channels:</b>\n<code>{', '.join(lines)}</code>")
+                            lines = []
+                            for k, v in TRACKED_COINS_ROUTER.items():
+                                lines.append(f"{k.split('/')[0]} ({v['exchange']}-{v['type']})")
+                            send_telegram_message(token, chat_id, f"📋 *Active Routing System Grid:*\n`{', '.join(lines)}`")
 
                         elif msg_text == '/report':
-                            send_telegram_message(build_premium_report_string())
+                            send_telegram_message(token, chat_id, build_premium_report_string())
         except Exception as e:
             print(f"[CONTROL PANEL ERROR] {e}")
         time.sleep(1)
 
 def run_bot_loop():
-    bot = RefinedQuantEngineV27()
+    TELEGRAM_TOKEN = get_clean_env_var("TELEGRAM_TOKEN")
+    TELEGRAM_CHAT_ID = get_clean_env_var("TELEGRAM_CHAT_ID")
+    
+    startup_msg = "🚀 *Smart Fallback Hybrid Scalper V18 Live!*\nNow automatically routing between Futures and Spot markets safely."
+    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, startup_msg)
+
+    bot = HybridExhaustionEngineV18()
     last_report_time = time.time()
-    SCAN_INTERVAL = 30 # <-- Fixed: Conserves thread overheads preventing execution choking
 
     while True:
         active_router_snapshot = dict(TRACKED_COINS_ROUTER)
+        
         if not active_router_snapshot:
             time.sleep(5)
             continue
@@ -450,50 +345,24 @@ def run_bot_loop():
             if metrics:
                 clean_name = asset.split('/')[0]
                 LATEST_METRICS_CACHE[clean_name] = metrics
-                
-                current_signal_state = metrics['status']
-                last_logged_state = LAST_SENT_ALERT_STATE.get(clean_name, "SCAN")
-                
-                # --- FIX 1: EXPLICIT LIVE CRITICAL DEBUG LOGGER LINE ---
-                print(f"[DEBUG] {clean_name} | Current: {current_signal_state} | Last: {last_logged_state} | Wall: {metrics['wall_detection']} | Score: {metrics['score_raw']}")
-
-                # --- FIX 2: CONSECUTIVE CYCLE VERIFICATION MATRIX ---
-                if clean_name not in SIGNAL_CONFIRMATION:
-                    SIGNAL_CONFIRMATION[clean_name] = {"signal": current_signal_state, "count": 1}
-                elif SIGNAL_CONFIRMATION[clean_name]["signal"] == current_signal_state:
-                    SIGNAL_CONFIRMATION[clean_name]["count"] += 1
-                else:
-                    SIGNAL_CONFIRMATION[clean_name] = {"signal": current_signal_state, "count": 1}
-                    
-                confirmed_count = SIGNAL_CONFIRMATION[clean_name]["count"]
-                
-                # --- FIX 3: 3-CYCLES CONFIRMED + 30 MINS COOLDOWN ENGINE ---
-                if confirmed_count >= 3 and current_signal_state in ["LONG_THOKO", "SHORT_THOKO"]:
-                    if current_signal_state != last_logged_state:
-                        current_time = time.time()
-                        cooldown_timestamp = ALERT_COOLDOWN.get(clean_name, 0.0)
-                        
-                        if current_time > cooldown_timestamp:
-                            send_telegram_message(build_premium_war_room_card(clean_name, metrics))
-                            LAST_SENT_ALERT_STATE[clean_name] = current_signal_state
-                            ALERT_COOLDOWN[clean_name] = current_time + 1800 # Fixed: Hard 30 Minutes lock!
-                else:
-                    # Reset baseline state memories cleanly if signal drops out of bounds
-                    if current_signal_state == "SCAN" and last_logged_state != "SCAN":
-                        LAST_SENT_ALERT_STATE[clean_name] = "SCAN"
+                if metrics['status'] == "TRIGGER" and route_info['type'] == "FUTURES":
+                    alert_txt = f"🚨 *[FUTURES STRATEGY REVERSAL]* 🚨\n\n*Coin:* {clean_name}\n*Network:* {route_info['exchange']}\n*Price:* {metrics['price']}\n*Exhaustion Score:* {metrics['score']:.1f}/100"
+                    send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, alert_txt)
+            time.sleep(0.5)
 
         current_time = time.time()
         if current_time - last_report_time >= 60:
-            send_telegram_message(build_premium_report_string())
+            send_telegram_message(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, build_premium_report_string())
             last_report_time = current_time
-            
-        time.sleep(SCAN_INTERVAL) # Balanced pacing system
+        time.sleep(5)
 
 if __name__ == "__main__":
-    Thread(target=run_web_server, daemon=True).start()
-    
-    startup_msg = "🚀 <b>QUANT WAR ROOM ENGINE v27.0 SYSTEM LIVE</b>\n3-Cycle Confirmation Pipeline and Scored Stability Metrics Armed. Anti-Spam fully resolved."
-    send_telegram_message(startup_msg)
-    
-    Thread(target=telegram_control_panel_listener, daemon=True).start()
+    server_thread = Thread(target=run_web_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    control_thread = Thread(target=telegram_control_panel_listener)
+    control_thread.daemon = True
+    control_thread.start()
+
     run_bot_loop()
