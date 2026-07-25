@@ -1,5 +1,6 @@
 import time
 import traceback
+import sys
 from datetime import datetime
 import ccxt
 import pandas as pd
@@ -9,6 +10,14 @@ import os
 import requests
 from threading import Thread
 from flask import Flask
+
+# Render (and most Docker log pipelines) buffer stdout by default, so
+# print() from background threads can sit unflushed and never show up in
+# the log viewer. Force line-buffering so every print() appears immediately.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 # --- GLOBAL TRACKING REGISTRY ---
 # Stores the combination of exchange and specific market type (SWAP or SPOT)
@@ -285,22 +294,56 @@ def telegram_control_panel_listener():
     token = get_clean_env_var("TELEGRAM_TOKEN")
     chat_id = get_clean_env_var("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
+        print("[TELEGRAM LISTENER] TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing — listener not starting.")
         return
+
+    masked_token = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else "***"
+    print(f"[TELEGRAM LISTENER] Starting. Token={masked_token} ChatID={chat_id}")
+
+    # Safety net: if a webhook was ever set on this bot (even accidentally,
+    # even in a past deploy), Telegram silently refuses getUpdates with a
+    # 409 Conflict and this loop would sit there doing nothing. Clearing it
+    # on every boot costs nothing if no webhook exists.
+    try:
+        wh_info = requests.get(f"https://api.telegram.org/bot{token}/getWebhookInfo", timeout=10).json()
+        print(f"[TELEGRAM LISTENER] getWebhookInfo -> {wh_info}")
+        if wh_info.get("result", {}).get("url"):
+            del_resp = requests.get(f"https://api.telegram.org/bot{token}/deleteWebhook?drop_pending_updates=true", timeout=10).json()
+            print(f"[TELEGRAM LISTENER] Active webhook found and cleared -> {del_resp}")
+    except Exception as e:
+        print(f"[TELEGRAM LISTENER] getWebhookInfo check failed (non-fatal): {e}")
 
     offset = 0
     bot_instance = HybridExhaustionEngineV18()
+    poll_count = 0
 
     while True:
         url = f"https://api.telegram.org/bot{token}/getUpdates?offset={offset}&timeout=20"
         try:
-            response = requests.get(url, timeout=25).json()
+            raw_response = requests.get(url, timeout=25)
+            response = raw_response.json()
+            poll_count += 1
+
+            if response.get("ok") is False:
+                # Telegram explicitly rejected the request - this is the
+                # single most useful line for diagnosing "commands not working".
+                print(f"[TELEGRAM API ERROR] {response.get('error_code')}: {response.get('description')}")
+
+            if poll_count % 30 == 0:
+                # Heartbeat so we can see in Render logs that the loop is alive at all
+                print(f"[TELEGRAM LISTENER] Still polling... (cycle {poll_count}, offset {offset})")
+
             if "result" in response:
+                if response["result"]:
+                    print(f"[TELEGRAM LISTENER] Received {len(response['result'])} update(s)")
                 for update in response["result"]:
                     offset = update["update_id"] + 1
                     if "message" in update and "text" in update["message"]:
                         msg_text = update["message"]["text"].strip()
                         incoming_chat_id = str(update["message"]["chat"]["id"])
+                        print(f"[TELEGRAM LISTENER] Incoming from chat_id={incoming_chat_id}: '{msg_text}'")
                         if incoming_chat_id != str(chat_id).strip():
+                            print(f"[TELEGRAM LISTENER] Ignored — chat_id mismatch (expected {chat_id}, got {incoming_chat_id})")
                             continue
 
                         if msg_text.startswith('/add '):
